@@ -1,0 +1,34 @@
+# overrides for kube-prometheus-stack
+# keeping resource footprints small - single node lab
+
+grafana:
+  adminPassword: admin123    # lab only, fine to be lazy here
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+prometheus:
+  prometheusSpec:
+    retention: 2d            # no point keeping weeks of data, cluster lives hours
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+    # let prometheus find ALL ServiceMonitors/PodMonitors cluster-wide,
+    # not just ones with the release label - needed to scrape podinfo later
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
