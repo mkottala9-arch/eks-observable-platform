@@ -1,0 +1,24 @@
+# first deployment attempt - no resource requests/limits set
+# keeping this file in the repo deliberately, the mistake is documented
+# in the readme
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: podinfo
+  namespace: manual-managed
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: podinfo
+  template:
+    metadata:
+      labels:
+        app: podinfo
+    spec:
+      containers:
+        - name: podinfo
+          image: ghcr.io/stefanprodan/podinfo:6.7.0
+          ports:
+            - containerPort: 9898
+              name: http
