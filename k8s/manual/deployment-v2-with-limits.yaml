@@ -1,0 +1,32 @@
+# v2 - added resource requests/limits after the oom incident
+# requests -> scheduler can account for the pod, no blind overcommit
+# limits -> contained at 256Mi instead of endangering the node
+# this makes the pods Burstable QoS instead of BestEffort
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: podinfo
+  namespace: manual-managed
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: podinfo
+  template:
+    metadata:
+      labels:
+        app: podinfo
+    spec:
+      containers:
+        - name: podinfo
+          image: ghcr.io/stefanprodan/podinfo:6.7.0
+          ports:
+            - containerPort: 9898
+              name: http
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

@@ -1,0 +1,19 @@
+# same greedy 6G program but WITH a 512Mi limit
+# gets oom-killed at the cgroup boundary within seconds - blast radius
+# is just this container, node never feels it
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-hog-limited
+  namespace: manual-managed
+spec:
+  restartPolicy: Never
+  containers:
+    - name: stress
+      image: polinux/stress
+      args: ["stress", "--vm", "1", "--vm-bytes", "6G", "--vm-hang", "300"]
+      resources:
+        requests:
+          memory: 256Mi
+        limits:
+          memory: 512Mi

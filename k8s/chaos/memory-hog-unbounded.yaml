@@ -1,0 +1,14 @@
+# noisy neighbor pod - allocates 6G with NO limits (BestEffort)
+# used to reproduce the oom incident: scheduler cant see it coming,
+# nothing contains it, kernel picks the victim
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-hog-unbounded
+  namespace: manual-managed
+spec:
+  restartPolicy: Never
+  containers:
+    - name: stress
+      image: polinux/stress
+      args: ["stress", "--vm", "1", "--vm-bytes", "6G", "--vm-hang", "300"]
