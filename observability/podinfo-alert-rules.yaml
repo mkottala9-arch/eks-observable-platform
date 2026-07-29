@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: podinfo-alerts
+  namespace: manual-managed
+  labels:
+    release: kps          
+spec:
+  groups:
+    - name: podinfo.rules
+      rules:
+        - alert: PodinfoContainerRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="manual-managed"}[5m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Podinfo container is restarting"
+            description: "A container in pod {{ $labels.pod }} has restarted in the last 5 minutes."
