@@ -1,0 +1,17 @@
+# tells the prometheus operator to scrape podinfo's /metrics endpoint
+# selects the service by its app label, scrapes the port named http
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: podinfo
+  namespace: manual-managed
+  labels:
+    app: podinfo
+spec:
+  selector:
+    matchLabels:
+      app: podinfo
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
