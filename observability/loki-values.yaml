@@ -1,0 +1,18 @@
+loki:
+  persistence:
+    enabled: false          # no persistent volume, logs live in memory/ephemeral
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+promtail:
+  enabled: true             # per-node log collector
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
