@@ -1,91 +1,86 @@
-# Runbook — teardown & rebuild
+# Runbook
 
-Cluster: `eks-observable-platform` | Region: `ap-south-2` | Account: `756808989597`
+Cluster: eks-observable-platform, region ap-south-2
 
----
-
-## TEARDOWN
-
-Order matters — the ALB and the eksctl IAM role are outside Terraform's view.
+## Teardown
 
 ```bash
-# 1. Ingress first (controller must be alive to delete the ALB)
+# Delete the ingress first. The controller must be running to delete the ALB.
 kubectl delete -f k8s/manual/ingress.yaml
 
-# 2. Confirm the ALB is gone before continuing
+# Check that the ALB is gone before moving on.
 aws elbv2 describe-load-balancers --region ap-south-2 --output table
 
-# 3. Remove the eksctl IAM role + CloudFormation stack
+# Terraform doesn't manage this because it was created with eksctl.
 eksctl delete iamserviceaccount \
   --cluster=eks-observable-platform --region=ap-south-2 \
   --namespace=kube-system --name=aws-load-balancer-controller
 
-# 4. Destroy the rest
 terraform destroy
 ```
 
-Why: deleting the Ingress makes the controller remove the ALB (finalizer holds
-the object until it's done). An orphaned ALB keeps billing and blocks VPC
-deletion. Terraform can't see the eksctl-made IAM role or CFN stack.
+## First time only
 
----
-
-## REBUILD
+The policy survives `terraform destroy`, so skip this on rebuilds.
 
 ```bash
-# 1. Infra (~10-15 min)
+curl -o iam-policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.9.2/docs/install/iam_policy.json
+
+aws iam create-policy \
+  --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file://iam-policy.json
+
+# To check the policy ARN: aws iam list-policies --scope Local | grep AWSLoadBalancer
+```
+
+## Rebuild
+
+```bash
 terraform apply
 
-# 2. Connect
 aws eks update-kubeconfig --region ap-south-2 --name eks-observable-platform
 kubectl get nodes
 
-# 3. App
 kubectl create namespace manual-managed
 kubectl apply -f k8s/manual/deployment-v2-with-limits.yaml
 kubectl apply -f k8s/manual/service.yaml
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
 
-# 4. Guardrails
 kubectl apply -f k8s/manual/limitrange.yaml
 kubectl apply -f k8s/manual/resourcequota.yaml
 kubectl apply -f k8s/manual/pdb.yaml
 
-# 5. Helm repos
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo add grafana https://grafana.github.io/helm-charts
 helm repo add eks https://aws.github.io/eks-charts
 helm repo update
 
-# 6. Monitoring stack (wait for 6 pods Running)
 kubectl create namespace monitoring
 helm install kps prometheus-community/kube-prometheus-stack \
   -n monitoring -f observability/kube-prom-stack-values.yaml
-kubectl get pods -n monitoring
 
-# 7. Scraping + alerts
 kubectl apply -f observability/podinfo-servicemonitor.yaml
 kubectl apply -f observability/podinfo-alert-rules.yaml
 
-# 8. Loki
 helm install loki grafana/loki-stack -n monitoring -f observability/loki-values.yaml
 
-# 8b. MUST DO or Grafana crash-loops (two default datasources)
-kubectl edit configmap loki-loki-stack -n monitoring    # isDefault: true -> false
+# Two default data sources will crash Grafana, so loki should be set to false
+kubectl edit configmap loki-loki-stack -n monitoring   # isDefault: true -> false
 kubectl rollout restart deployment kps-grafana -n monitoring
 
-# 9. OIDC (new cluster = new issuer, must re-associate)
+# A new cluster gets a new OIDC issuer, so run this every time.
 eksctl utils associate-iam-oidc-provider \
   --region ap-south-2 --cluster eks-observable-platform --approve
 
-# 10. IRSA role + SA (policy already exists - do NOT recreate it)
+# The policy already exists, so just attach it.
+# This creates an IAM role (with the policy attached) and a Kubernetes
+# service account annotated with the role ARN for IRSA.
 eksctl create iamserviceaccount \
   --cluster=eks-observable-platform --region=ap-south-2 \
   --namespace=kube-system --name=aws-load-balancer-controller \
-  --attach-policy-arn=arn:aws:iam::756808989597:policy/AWSLoadBalancerControllerIAMPolicy \
-  --approve
+  --attach-policy-arn=<policy arn> --approve
 
-# 11. ALB controller
+# create=false tells Helm to use the existing service account. As a new service account would not have the IAM role annotation.
 helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
   -n kube-system \
   --set clusterName=eks-observable-platform \
@@ -95,37 +90,28 @@ helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
   --set vpcId=$(aws eks describe-cluster --name eks-observable-platform \
     --region ap-south-2 --query "cluster.resourcesVpcConfig.vpcId" --output text)
 
-# 12. Ingress (ADDRESS appears in ~2-3 min)
+# The ALB address usually takes 2–3 minutes to appear.
 kubectl apply -f k8s/manual/ingress.yaml
 kubectl get ingress -n manual-managed -w
 
-# 13. Grafana dashboard - re-import the JSON
+# Grafana has no persistent volume, so re-import the dashboard after each rebuild.
 kubectl port-forward -n monitoring svc/kps-grafana 3000:80
-# localhost:3000 (admin/admin123) -> Dashboards -> New -> Import
-# -> observability/grafana-dashboards/podinfo-dashboard.json
+# localhost:3000 -> Dashboards -> Import -> observability/grafana-dashboards/podinfo-dashboard.json
 ```
 
----
+## k6 load testing
 
-## Survives teardown (don't recreate)
+Runs in its own namespace, so the LimitRange and ResourceQuota don't apply, and
+its restarts don't appear in the podinfo dashboards.
 
-- eksctl binary, helm repos
-- **IAM policy** `AWSLoadBalancerControllerIAMPolicy` — reuse the ARN
-- S3 state bucket
+```bash
+kubectl create namespace k6-testing
+kubectl create configmap k6-script --from-file=k6/load-test.js -n k6-testing
+kubectl apply -f k6/k6-job.yaml
 
-## Must recreate every time
+kubectl logs -f k6-load -n k6-testing
+```
 
-- OIDC association (new cluster = new issuer URL)
-- IRSA role + ServiceAccount
-- Grafana dashboard (re-import JSON)
-
----
-
-## Gotchas
-
-1. Delete Ingress **before** destroy — orphaned ALB bills and blocks VPC deletion.
-2. Never delete the ALB controller before the Ingress — finalizer leaves it stuck Terminating.
-3. Re-associate OIDC after every rebuild.
-4. Don't recreate the IAM policy → `EntityAlreadyExists`.
-5. Fix Loki's `isDefault` right after install, or Grafana crash-loops.
-6. ALB DNS may not resolve locally at first — `nslookup <alb-dns> 8.8.8.8` and curl the IP.
+## Notes
+The node group is configured with a desired size of 1 and a maximum size of 2.
+The extra node is used for the node drain test.

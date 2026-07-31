@@ -1,6 +1,4 @@
-# noisy neighbor pod - allocates 6G with NO limits (BestEffort)
-# used to reproduce the oom incident: scheduler cant see it coming,
-# nothing contains it, kernel picks the victim
+# 6G stress with no limits - this is what took the node to 95% in incident 1
 apiVersion: v1
 kind: Pod
 metadata:

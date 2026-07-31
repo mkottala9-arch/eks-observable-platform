@@ -4,12 +4,13 @@ metadata:
   name: podinfo
   namespace: manual-managed
   labels:
-    app: podinfo          # servicemonitor selects the service by this label
+    app: podinfo
 spec:
   selector:
     app: podinfo
   ports:
-    - name: http          # servicemonitor references this port by name
+    # label above + this port name are both needed by the servicemonitor
+    - name: http
       port: 9898
       targetPort: http
   type: ClusterIP

@@ -1,15 +1,14 @@
-# Asks AWS which AZs exist in this region at runtime.
-# Better than hardcoding "ap-south-1a" etc - AZ names can vary per account.
+# az names vary per account so fetching them instead of hardcoding
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# Main network - 10.0.0.0/16 gives us 65k IPs to slice into subnets.
 resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
+  cidr_block = "10.0.0.0/16"
+  # both required by eks, cluster creation fails without them
   enable_dns_support   = true
   enable_dns_hostnames = true
-    # DNS support + hostnames both required by EKS, cluster creation fails without them.
+
   tags = {
     Name = "${local.project_name}-vpc"
   }
@@ -23,22 +22,19 @@ resource "aws_internet_gateway" "main" {
   }
 }
 
-# Two public subnets, one per AZ (EKS control plane needs min 2 AZs).
-# count=2 runs this block twice: index 0 -> 10.0.0.0/24 in first AZ,
-# index 1 -> 10.0.1.0/24 in second AZ.
-# Public subnets only, no NAT gateway as it costs more - in a real prod setup nodes would sit in private
-# subnets behind NAT.
+# two subnets because eks needs 2 AZs for the control plane.
+# public only, no NAT gateway - but in a real setup, we would put nodes in private subnets
 resource "aws_subnet" "public" {
   count                   = 2
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.${count.index}.0/24"
   availability_zone       = data.aws_availability_zones.available.names[count.index]
-  map_public_ip_on_launch = true 
+  map_public_ip_on_launch = true
 
   tags = {
     Name = "${local.project_name}-public-${count.index}"
-    # EKS + LB controller find subnets through these tags.
-    # Missing them = LoadBalancer services fail to create, silently.
+    # eks and the lb controller find subnets through these.
+    # without them load balancers just never get created, no error
     "kubernetes.io/role/elb"                      = "1"
     "kubernetes.io/cluster/${local.project_name}" = "shared"
   }

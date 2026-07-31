@@ -1,8 +1,7 @@
-# overrides for kube-prometheus-stack
-# keeping resource footprints small - single node lab
+# small footprints, single node lab
 
 grafana:
-  adminPassword: admin123    # lab only, fine to be lazy here
+  adminPassword: mohan123    # lab only
   resources:
     requests:
       cpu: 50m
@@ -12,15 +11,15 @@ grafana:
 
 prometheus:
   prometheusSpec:
-    retention: 2d            # no point keeping weeks of data, cluster lives hours
+    retention: 2d            # cluster only lives a few hours anyway
     resources:
       requests:
         cpu: 100m
         memory: 512Mi
       limits:
         memory: 1Gi
-    # let prometheus find ALL ServiceMonitors/PodMonitors cluster-wide,
-    # not just ones with the release label - needed to scrape podinfo later
+    # without these it only picks up servicemonitors with the release: kps label,
+    # so podinfo never gets scraped
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
 

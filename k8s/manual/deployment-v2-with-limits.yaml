@@ -1,7 +1,5 @@
-# v2 - added resource requests/limits after the oom incident
-# requests -> scheduler can account for the pod, no blind overcommit
-# limits -> contained at 256Mi instead of endangering the node
-# this makes the pods Burstable QoS instead of BestEffort
+# added requests/limits after the oom incident
+# actual usage is around ~13Mi so 64Mi request is comfortable, 256Mi cap is plenty
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,7 +17,7 @@ spec:
     spec:
       containers:
         - name: podinfo
-          image: ghcr.io/stefanprodan/podinfo:6.14.1
+          image: ghcr.io/stefanprodan/podinfo:6.14.1 # using 6.14.1 for the fault injection endpoint
           ports:
             - containerPort: 9898
               name: http

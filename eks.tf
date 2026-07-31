@@ -1,12 +1,10 @@
 # ---------- IAM ----------
 
-# control plane role - EKS is managed but it still creates ENIs, SGs, LBs
-# inside our vpc, so it needs permissions from us
+# eks is managed but still creates ENIs/SGs/LBs in our vpc, so it needs a role from us
 resource "aws_iam_role" "eks_cluster" {
   name = "${local.project_name}-cluster-role"
 
-  # trust policy - only eks service can assume this
-  # (same as selecting "EKS - Cluster" use case in console)
+  # only the eks service can assume this (same as "EKS - Cluster" use case in the console)
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -24,7 +22,7 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-# node role - workers are just ec2 machines, so trust is ec2 not eks
+# workers are plain ec2 instances, so this one trusts ec2 not eks
 resource "aws_iam_role" "eks_nodes" {
   name = "${local.project_name}-node-role"
 
@@ -40,7 +38,7 @@ resource "aws_iam_role" "eks_nodes" {
   })
 }
 
-# WorkerNode -> join cluster, CNI -> pod networking, ECR -> pull images
+# all three are needed - joining the cluster, pod networking, pulling images
 resource "aws_iam_role_policy_attachment" "node_worker_policy" {
   role       = aws_iam_role.eks_nodes.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
@@ -58,19 +56,16 @@ resource "aws_iam_role_policy_attachment" "node_ecr_policy" {
 
 # ---------- Cluster ----------
 
-# control plane only, no nodes from this. aws manages apiserver/etcd,
-# HA across AZs, we never see those machines.
 resource "aws_eks_cluster" "main" {
   name     = local.project_name
   role_arn = aws_iam_role.eks_cluster.arn
 
   vpc_config {
-    # both subnets - eks needs min 2 AZs for control plane
+    # both subnets, eks wants 2 AZs minimum for the control plane
     subnet_ids = aws_subnet.public[*].id
   }
 
-  # terraform cant detect this dependency itself, cluster creation
-  # can fail if role has no permissions attached yet
+  # terraform doesnt see this dependency on its own and the cluster can fail if the role has no policy attached yet.
   depends_on = [
     aws_iam_role_policy_attachment.eks_cluster_policy
   ]
@@ -78,9 +73,6 @@ resource "aws_eks_cluster" "main" {
 
 # ---------- Node group ----------
 
-# node group launches and manages the actual worker ec2s
-# max 2 kept for node drain scenario later, cant drain the only node
-# on demand because spot interruption in middle of chaos tests will mess up the results
 resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
   node_group_name = "${local.project_name}-nodes"
@@ -93,7 +85,7 @@ resource "aws_eks_node_group" "main" {
   scaling_config {
     desired_size = 1
     min_size     = 1
-    max_size     = 2
+    max_size     = 2 # max 2 so i can drain a node later for testing
   }
 
   depends_on = [

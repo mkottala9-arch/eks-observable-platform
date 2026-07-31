@@ -12,7 +12,6 @@ terraform {
     use_lockfile = true
   }
 
-  # Pin AWS provider to 5.x - avoids surprise breaking changes from v6
   required_providers {
     aws = {
       source  = "hashicorp/aws"

@@ -1,6 +1,4 @@
-# first deployment attempt - no resource requests/limits set
-# keeping this file in the repo deliberately, the mistake is documented
-# in the readme
+# original deploy, no requests or limits. keeping it for the writeup
 apiVersion: apps/v1
 kind: Deployment
 metadata:

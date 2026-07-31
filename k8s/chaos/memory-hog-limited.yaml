@@ -1,6 +1,5 @@
-# same greedy 6G program but WITH a 512Mi limit
-# gets oom-killed at the cgroup boundary within seconds - blast radius
-# is just this container, node never feels it
+# same 6G stress but capped at 512Mi
+# dies in about a second, node memory doesnt move
 apiVersion: v1
 kind: Pod
 metadata:

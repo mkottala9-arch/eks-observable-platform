@@ -1,4 +1,4 @@
-# routing rules - the ALB controller reads this and builds an ALB
+# target-type ip so the alb hits pod ips directly, keeps the service as ClusterIP
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
