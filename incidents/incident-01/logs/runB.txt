@@ -1,0 +1,238 @@
+
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top nodes
+NAME                                        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+ip-10-0-0-180.ap-south-2.compute.internal   60m          3%       1343Mi          18%         
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top pods -n manual-managed
+NAME                       CPU(cores)   MEMORY(bytes)   
+podinfo-7fc7b45d94-7z4cc   0m           16Mi            
+podinfo-7fc7b45d94-cgrkt   1m           16Mi            
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl apply -f k8s/chaos/memory-hog-unbounded.yaml
+pod/memory-hog-unbounded created
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top nodes
+NAME                                        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+ip-10-0-0-180.ap-south-2.compute.internal   78m          4%       7279Mi          102%        
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top pods -n manual-managed
+NAME                       CPU(cores)   MEMORY(bytes)   
+memory-hog-unbounded       0m           6156Mi          
+podinfo-7fc7b45d94-7z4cc   0m           18Mi            
+podinfo-7fc7b45d94-cgrkt   1m           16Mi            
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top nodes
+NAME                                        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+ip-10-0-0-180.ap-south-2.compute.internal   55m          2%       7279Mi          102%        
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top pods -n manual-managed
+NAME                       CPU(cores)   MEMORY(bytes)   
+memory-hog-unbounded       0m           6156Mi          
+podinfo-7fc7b45d94-7z4cc   1m           18Mi            
+podinfo-7fc7b45d94-cgrkt   0m           16Mi            
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl run memory-hog-2 -n manual-managed --restart=Never \
+  --image=polinux/stress -- stress --vm 1 --vm-bytes 1200M --vm-hang 300
+pod/memory-hog-2 created
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top nodes
+NAME                                        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+ip-10-0-0-180.ap-south-2.compute.internal   78m          4%       7283Mi          102%        
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top pods -n manual-managed
+NAME                       CPU(cores)   MEMORY(bytes)   
+podinfo-7fc7b45d94-7z4cc   1m           18Mi            
+podinfo-7fc7b45d94-cgrkt   1m           16Mi            
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n manual-managed
+NAME                       READY   STATUS                   RESTARTS   AGE
+memory-hog-2               1/1     Running                  0          86s
+memory-hog-unbounded       0/1     ContainerStatusUnknown   1          3m51s
+podinfo-7fc7b45d94-7z4cc   1/1     Running                  0          5h50m
+podinfo-7fc7b45d94-cgrkt   1/1     Running                  0          5h45m
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl describe pod memory-hog-unbounded -n manual-managed
+Name:             memory-hog-unbounded
+Namespace:        manual-managed
+Priority:         0
+Service Account:  default
+Node:             ip-10-0-0-180.ap-south-2.compute.internal/10.0.0.180
+Start Time:       Fri, 31 Jul 2026 18:03:30 +0000
+Labels:           topology.kubernetes.io/region=ap-south-2
+                  topology.kubernetes.io/zone=ap-south-2a
+Annotations:      <none>
+Status:           Failed
+Reason:           Evicted
+Message:          The node was low on resource: memory. Threshold quantity: 100Mi, available: 312Ki. Container stress was using 6304044Ki, request is 0, has larger consumption of memory. 
+IP:               10.0.0.40
+IPs:
+  IP:  10.0.0.40
+Containers:
+  stress:
+    Container ID:  
+    Image:         polinux/stress
+    Image ID:      
+    Port:          <none>
+    Host Port:     <none>
+    Args:
+      stress
+      --vm
+      1
+      --vm-bytes
+      6G
+      --vm-hang
+      300
+    State:          Terminated
+      Reason:       ContainerStatusUnknown
+      Message:      The container could not be located when the pod was terminated
+      Exit Code:    137
+      Started:      Mon, 01 Jan 0001 00:00:00 +0000
+      Finished:     Mon, 01 Jan 0001 00:00:00 +0000
+    Last State:     Terminated
+      Reason:       ContainerStatusUnknown
+      Message:      The container could not be located when the pod was deleted.  The container used to be Running
+      Exit Code:    137
+      Started:      Mon, 01 Jan 0001 00:00:00 +0000
+      Finished:     Mon, 01 Jan 0001 00:00:00 +0000
+    Ready:          False
+    Restart Count:  1
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-8hrg4 (ro)
+Conditions:
+  Type                        Status
+  DisruptionTarget            True 
+  PodReadyToStartContainers   False 
+  Initialized                 True 
+  Ready                       False 
+  ContainersReady             False 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-8hrg4:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type     Reason     Age    From               Message
+  ----     ------     ----   ----               -------
+  Normal   Scheduled  4m22s  default-scheduler  Successfully assigned manual-managed/memory-hog-unbounded to ip-10-0-0-180.ap-south-2.compute.internal
+  Normal   Pulling    4m21s  kubelet            spec.containers{stress}: Pulling image "polinux/stress"
+  Normal   Pulled     4m17s  kubelet            spec.containers{stress}: Successfully pulled image "polinux/stress" in 4.317s (4.317s including waiting). Image size: 4041495 bytes.
+  Normal   Created    4m17s  kubelet            spec.containers{stress}: Container created
+  Normal   Started    4m17s  kubelet            spec.containers{stress}: Container started
+  Warning  Evicted    110s   kubelet            The node was low on resource: memory. Threshold quantity: 100Mi, available: 312Ki. Container stress was using 6304044Ki, request is 0, has larger consumption of memory.
+  Normal   Killing    110s   kubelet            spec.containers{stress}: Stopping container stress
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl describe pod memory-hog-2 -n manual-managed 2>&1
+Name:             memory-hog-2
+Namespace:        manual-managed
+Priority:         0
+Service Account:  default
+Node:             ip-10-0-0-180.ap-south-2.compute.internal/10.0.0.180
+Start Time:       Fri, 31 Jul 2026 18:05:55 +0000
+Labels:           run=memory-hog-2
+                  topology.kubernetes.io/region=ap-south-2
+                  topology.kubernetes.io/zone=ap-south-2a
+Annotations:      <none>
+Status:           Running
+IP:               10.0.0.41
+IPs:
+  IP:  10.0.0.41
+Containers:
+  memory-hog-2:
+    Container ID:  containerd://0d2beb1f0b8871370880f0bd1984e1d579031611fca159a78c31e475786cd74d
+    Image:         polinux/stress
+    Image ID:      docker.io/polinux/stress@sha256:b6144f84f9c15dac80deb48d3a646b55c7043ab1d83ea0a697c09097aaad21aa
+    Port:          <none>
+    Host Port:     <none>
+    Args:
+      stress
+      --vm
+      1
+      --vm-bytes
+      1200M
+      --vm-hang
+      300
+    State:          Running
+      Started:      Fri, 31 Jul 2026 18:05:58 +0000
+    Ready:          True
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-vmzjx (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   True 
+  Initialized                 True 
+  Ready                       True 
+  ContainersReady             True 
+  PodScheduled                True 
+Volumes:
+  kube-api-access-vmzjx:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   BestEffort
+Node-Selectors:              <none>
+Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
+                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
+Events:
+  Type    Reason     Age   From               Message
+  ----    ------     ----  ----               -------
+  Normal  Scheduled  2m7s  default-scheduler  Successfully assigned manual-managed/memory-hog-2 to ip-10-0-0-180.ap-south-2.compute.internal
+  Normal  Pulling    2m5s  kubelet            spec.containers{memory-hog-2}: Pulling image "polinux/stress"
+  Normal  Pulled     2m4s  kubelet            spec.containers{memory-hog-2}: Successfully pulled image "polinux/stress" in 1.331s (1.332s including waiting). Image size: 4041495 bytes.
+  Normal  Created    2m4s  kubelet            spec.containers{memory-hog-2}: Container created
+  Normal  Started    2m4s  kubelet            spec.containers{memory-hog-2}: Container started
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top nodes
+NAME                                        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+ip-10-0-0-180.ap-south-2.compute.internal   66m          3%       2326Mi          32%         
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl describe node ip-10-0-0-180.ap-south-2.compute.internal | grep -A8 "Conditions:"
+Conditions:
+  Type             Status  LastHeartbeatTime                 LastTransitionTime                Reason                         Message
+  ----             ------  -----------------                 ------------------                ------                         -------
+  MemoryPressure   True    Fri, 31 Jul 2026 18:06:04 +0000   Fri, 31 Jul 2026 18:06:04 +0000   KubeletHasInsufficientMemory   kubelet has insufficient memory available
+  DiskPressure     False   Fri, 31 Jul 2026 18:06:04 +0000   Fri, 31 Jul 2026 17:56:29 +0000   KubeletHasNoDiskPressure       kubelet has no disk pressure
+  PIDPressure      False   Fri, 31 Jul 2026 18:06:04 +0000   Fri, 31 Jul 2026 17:56:29 +0000   KubeletHasSufficientPID        kubelet has sufficient PID available
+  Ready            True    Fri, 31 Jul 2026 18:06:04 +0000   Fri, 31 Jul 2026 17:56:41 +0000   KubeletReady                   kubelet is posting ready status
+Addresses:
+  InternalIP:   10.0.0.180
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get events -n manual-managed --sort-by='.lastTimestamp' | tail -25
+LAST SEEN   TYPE      REASON                   OBJECT                         MESSAGE
+16m         Warning   FailedScheduling         pod/podinfo-7fc7b45d94-cgrkt   no nodes available to schedule pods
+15m         Warning   FailedScheduling         pod/podinfo-7fc7b45d94-7z4cc   no nodes available to schedule pods
+11m         Normal    Pulling                  pod/podinfo-7fc7b45d94-7z4cc   Pulling image "ghcr.io/stefanprodan/podinfo:6.14.1"
+11m         Normal    Scheduled                pod/podinfo-7fc7b45d94-7z4cc   Successfully assigned manual-managed/podinfo-7fc7b45d94-7z4cc to ip-10-0-0-180.ap-south-2.compute.internal
+11m         Normal    Scheduled                pod/podinfo-7fc7b45d94-cgrkt   Successfully assigned manual-managed/podinfo-7fc7b45d94-cgrkt to ip-10-0-0-180.ap-south-2.compute.internal
+11m         Warning   FailedCreatePodSandBox   pod/podinfo-7fc7b45d94-cgrkt   Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox "516113fb028d774a1f688fb4e8b489cea780ccf5b6f5c84a2cc80fc4dd49c231": plugin type="aws-cni" name="aws-cni" failed (add): add cmd: failed to assign an IP address to container
+11m         Normal    Started                  pod/podinfo-7fc7b45d94-7z4cc   Container started
+11m         Normal    Created                  pod/podinfo-7fc7b45d94-7z4cc   Container created
+11m         Normal    Pulled                   pod/podinfo-7fc7b45d94-7z4cc   Successfully pulled image "ghcr.io/stefanprodan/podinfo:6.14.1" in 6.497s (6.497s including waiting). Image size: 33865369 bytes.
+11m         Normal    Pulled                   pod/podinfo-7fc7b45d94-cgrkt   Container image "ghcr.io/stefanprodan/podinfo:6.14.1" already present on machine and can be accessed by the pod
+11m         Normal    Started                  pod/podinfo-7fc7b45d94-cgrkt   Container started
+11m         Normal    Created                  pod/podinfo-7fc7b45d94-cgrkt   Container created
+5m3s        Normal    Scheduled                pod/memory-hog-unbounded       Successfully assigned manual-managed/memory-hog-unbounded to ip-10-0-0-180.ap-south-2.compute.internal
+5m2s        Normal    Pulling                  pod/memory-hog-unbounded       Pulling image "polinux/stress"
+4m58s       Normal    Pulled                   pod/memory-hog-unbounded       Successfully pulled image "polinux/stress" in 4.317s (4.317s including waiting). Image size: 4041495 bytes.
+4m58s       Normal    Created                  pod/memory-hog-unbounded       Container created
+4m58s       Normal    Started                  pod/memory-hog-unbounded       Container started
+2m38s       Normal    Scheduled                pod/memory-hog-2               Successfully assigned manual-managed/memory-hog-2 to ip-10-0-0-180.ap-south-2.compute.internal
+2m36s       Normal    Pulling                  pod/memory-hog-2               Pulling image "polinux/stress"
+2m35s       Normal    Pulled                   pod/memory-hog-2               Successfully pulled image "polinux/stress" in 1.331s (1.332s including waiting). Image size: 4041495 bytes.
+2m35s       Normal    Started                  pod/memory-hog-2               Container started
+2m35s       Normal    Created                  pod/memory-hog-2               Container created
+2m31s       Warning   Evicted                  pod/memory-hog-unbounded       The node was low on resource: memory. Threshold quantity: 100Mi, available: 312Ki. Container stress was using 6304044Ki, request is 0, has larger consumption of memory.
+2m31s       Normal    Killing                  pod/memory-hog-unbounded       Stopping container stress
+krishna@Asus-ROG:~/eks-observable-platform$ 
+
+
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n manual-managed -w
+NAME                       READY   STATUS    RESTARTS   AGE
+memory-hog-unbounded       1/1     Running   0          16s
+podinfo-7fc7b45d94-7z4cc   1/1     Running   0          5h47m
+podinfo-7fc7b45d94-cgrkt   1/1     Running   0          5h42m
+memory-hog-2               0/1     Pending   0          0s
+memory-hog-2               0/1     Pending   0          0s
+memory-hog-2               0/1     ContainerCreating   0          0s
+memory-hog-2               0/1     ContainerCreating   0          2s
+memory-hog-2               1/1     Running             0          3s
+memory-hog-unbounded       0/1     ContainerCreating   1          2m36s
+memory-hog-unbounded       0/1     ContainerStatusUnknown   1          2m36s
+^Ckrishna@Asus-ROG:~/eks-observable-platform$ 
+krishna@Asus-ROG:~/eks-observable-platform$ 

@@ -1,0 +1,80 @@
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n manual-managed -o wide
+NAME                       READY   STATUS    RESTARTS   AGE   IP           NODE                                        NOMINATED NODE   READINESS GATES
+podinfo-7fc7b45d94-5kkkj   1/1     Running   0          36m   10.0.0.43    ip-10-0-0-133.ap-south-2.compute.internal   <none>           <none>
+podinfo-7fc7b45d94-tgwkd   1/1     Running   0          36m   10.0.0.174   ip-10-0-0-133.ap-south-2.compute.internal   <none>           <none>
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n k6-testing
+NAME      READY   STATUS      RESTARTS   AGE
+k6-load   0/1     Completed   0          34m
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl delete pod k6-load -n k6-testing
+pod "k6-load" deleted from k6-testing namespace
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl apply -f k6/k6-job.yaml
+pod/k6-load created
+krishna@Asus-ROG:~/eks-observable-platform$ date
+Fri Jul 31 12:06:06 UTC 2026
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl drain ip-10-0-0-133.ap-south-2.compute.internal --ignore-daemonsets --delete-emptydir-data
+node/ip-10-0-0-133.ap-south-2.compute.internal cordoned
+Warning: ignoring DaemonSet-managed Pods: kube-system/aws-node-5ttxp, kube-system/kube-proxy-mnrmk, monitoring/kps-prometheus-node-exporter-2srdx, monitoring/loki-promtail-tm2vz
+evicting pod manual-managed/podinfo-7fc7b45d94-5kkkj
+evicting pod monitoring/kps-kube-state-metrics-5498c6bd8d-545kr
+evicting pod monitoring/kps-grafana-68bf56579d-xpwm4
+evicting pod kube-system/coredns-7df946745b-rq8vv
+evicting pod kube-system/aws-load-balancer-controller-5748b749b9-q77bm
+evicting pod kube-system/aws-load-balancer-controller-5748b749b9-rd6nh
+evicting pod monitoring/loki-0
+evicting pod kube-system/metrics-server-687f9dc499-2zn4r
+evicting pod manual-managed/podinfo-7fc7b45d94-tgwkd
+evicting pod kube-system/coredns-7df946745b-rvdx7
+evicting pod monitoring/alertmanager-kps-kube-prometheus-stack-alertmanager-0
+evicting pod monitoring/kps-kube-prometheus-stack-operator-77449555b8-57bw7
+evicting pod monitoring/prometheus-kps-kube-prometheus-stack-prometheus-0
+error when evicting pods/"podinfo-7fc7b45d94-tgwkd" -n "manual-managed" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.
+error when evicting pods/"coredns-7df946745b-rq8vv" -n "kube-system" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.
+pod/aws-load-balancer-controller-5748b749b9-rd6nh evicted
+I0731 12:06:25.356694  496940 request.go:752] "Waited before sending request" delay="1.045111955s" reason="client-side throttling, not priority and fairness" verb="GET" URL="https://D8AC0E9E42ED5C499A4183D5E6E4BA98.yl4.ap-south-2.eks.amazonaws.com/api/v1/namespaces/kube-system/pods/coredns-7df946745b-rvdx7"
+pod/kps-kube-state-metrics-5498c6bd8d-545kr evicted
+pod/kps-kube-prometheus-stack-operator-77449555b8-57bw7 evicted
+pod/prometheus-kps-kube-prometheus-stack-prometheus-0 evicted
+pod/kps-grafana-68bf56579d-xpwm4 evicted
+pod/metrics-server-687f9dc499-2zn4r evicted
+pod/aws-load-balancer-controller-5748b749b9-q77bm evicted
+pod/loki-0 evicted
+pod/alertmanager-kps-kube-prometheus-stack-alertmanager-0 evicted
+pod/podinfo-7fc7b45d94-5kkkj evicted
+evicting pod manual-managed/podinfo-7fc7b45d94-tgwkd
+error when evicting pods/"podinfo-7fc7b45d94-tgwkd" -n "manual-managed" (will retry after 5s): Cannot evict pod as it would violate the pod's disruption budget.
+evicting pod kube-system/coredns-7df946745b-rq8vv
+pod/coredns-7df946745b-rvdx7 evicted
+evicting pod manual-managed/podinfo-7fc7b45d94-tgwkd
+pod/coredns-7df946745b-rq8vv evicted
+pod/podinfo-7fc7b45d94-tgwkd evicted
+node/ip-10-0-0-133.ap-south-2.compute.internal drained
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n manual-managed -o wide
+NAME                       READY   STATUS    RESTARTS   AGE     IP           NODE                                        NOMINATED NODE   READINESS GATES
+podinfo-7fc7b45d94-8tbbg   1/1     Running   0          4m9s    10.0.0.165   ip-10-0-0-211.ap-south-2.compute.internal   <none>           <none>
+podinfo-7fc7b45d94-pkqtb   1/1     Running   0          4m20s   10.0.0.163   ip-10-0-0-211.ap-south-2.compute.internal   <none>           <none>
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get nodes
+NAME                                        STATUS                     ROLES    AGE     VERSION
+ip-10-0-0-133.ap-south-2.compute.internal   Ready,SchedulingDisabled   <none>   5h37m   v1.36.2-eks-bca9cf6
+ip-10-0-0-211.ap-south-2.compute.internal   Ready                      <none>   7m17s   v1.36.2-eks-bca9cf6
+krishna@Asus-ROG:~/eks-observable-platform$ 
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl logs k6-load -n k6-testing --tail=20
+running (06m01.0s), 3/3 VUs, 2793369 complete and 0 interrupted iterations
+default   [  40% ] 3 VUs  06m01.0s/15m0s
+
+running (06m02.0s), 3/3 VUs, 2801185 complete and 0 interrupted iterations
+default   [  40% ] 3 VUs  06m02.0s/15m0s
+
+running (06m03.0s), 3/3 VUs, 2809011 complete and 0 interrupted iterations
+default   [  40% ] 3 VUs  06m03.0s/15m0s
+
+running (06m04.0s), 3/3 VUs, 2816862 complete and 0 interrupted iterations
+default   [  40% ] 3 VUs  06m04.0s/15m0s
+
+running (06m05.0s), 3/3 VUs, 2824655 complete and 0 interrupted iterations
+default   [  41% ] 3 VUs  06m05.0s/15m0s
+
+running (06m06.0s), 3/3 VUs, 2832439 complete and 0 interrupted iterations
+default   [  41% ] 3 VUs  06m06.0s/15m0s
+
+running (06m07.0s), 3/3 VUs, 2840617 complete and 0 interrupted iterations
+default   [  41% ] 3 VUs  06m07.0s/15m0s

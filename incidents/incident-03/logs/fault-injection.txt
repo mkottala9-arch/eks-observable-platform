@@ -1,0 +1,56 @@
+krishna@Asus-ROG:~/eks-observable-platform$ date
+Fri Jul 31 11:31:16 UTC 2026
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl apply -f k6/k6-job.yaml
+pod/k6-load created
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n k6-testing
+NAME      READY   STATUS    RESTARTS   AGE
+k6-load   1/1     Running   0          7s
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n manual-managed 
+NAME                       READY   STATUS    RESTARTS   AGE
+podinfo-7fc7b45d94-5kkkj   1/1     Running   0          3m18s
+podinfo-7fc7b45d94-tgwkd   1/1     Running   0          3m17s
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl exec -n manual-managed podinfo-7fc7b45d94-5kkkj -- curl -s http://localhost:9898/fault_injection/status
+{
+  "fault_injection": "disabled"
+}krishna@Asus-ROG:~/eks-observable-platform$ kubectl exec -n manual-managed podinfo-7fc7b45d94-tgwkd-- curl -s http://localhost:9898/fault_injection/status
+error: exec [POD] [COMMAND] is not supported anymore. Use exec [POD] -- [COMMAND] instead
+See 'kubectl exec -h' for help and examples
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl exec -n manual-managed podinfo-7fc7b45d94-tgwkd -- curl -s http://localhost:9898/fault_injection/status
+{
+  "fault_injection": "disabled"
+}krishna@Asus-ROG:~/eks-observable-platform$
+krishna@Asus-ROG:~/eks-observable-platform$ 
+krishna@Asus-ROG:~/eks-observable-platform$ date
+Fri Jul 31 11:34:11 UTC 2026
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl exec -n manual-managed podinfo-7fc7b45d94-5kkkj -- curl -X POST http://localhost:9898/fault_injection/enable
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  0      0   0      0   0      0      0      0                              {
+  "fault_injection": "enabled"
+100     34 100     34   0      0   4061      0                              0}
+krishna@Asus-ROG:~/eks-observable-platform$ date
+kubectl exec -n manual-managed podinfo-7fc7b45d94-tgwkd -- curl -X POST http://localhost:9898/fault_injection/enable
+Fri Jul 31 11:41:35 UTC 2026
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+100     34 1{0      0   0      0      0      0                              0
+  "fault_injection": "enabled"
+100     34 100     34   0      0   6691      0                            }  0
+krishna@Asus-ROG:~/eks-observable-platform$ date
+Fri Jul 31 11:45:50 UTC 2026
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl exec -n manual-managed podinfo-7fc7b45d94-5kkkj -- curl -X POST http://localhost:9898/fault_injection/disable
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+100     35 100     35   0      0  20384      0                              {
+  "fault_injection": "disabled"
+}0
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl exec -n manual-managed podinfo-7fc7b45d94-tgwkd -- curl -X POST http://localhost:9898/fault_injection/disable
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  0      0   0      0   0      0      0      0                              0{
+  "fault_injection": "disabled"
+100     35 100     35   0      0    741      0                              0
+}krishna@Asus-ROG:~/eks-observable-platform$kubectl get pods -n k6-testing
+NAME      READY   STATUS      RESTARTS   AGE
+k6-load   0/1     Completed   0          16m
+krishna@Asus-ROG:~/eks-observable-platform$ 
