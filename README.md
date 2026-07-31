@@ -1,10 +1,10 @@
 # EKS Observable Platform
 
-An Amazon EKS reliability and observability lab built to study how Kubernetes behaves beyond a successful deployment.
+An Amazon EKS-based Kubernetes reliability and observability platform that demonstrates how workloads behave during real failures.
 
-The project provisions a small EKS environment, runs the `podinfo` application behind an AWS Application Load Balancer, adds Kubernetes resource guardrails, collects infrastructure and application telemetry, generates traffic with k6, and then introduces controlled failures.
+The platform runs the podinfo application behind an AWS Application Load Balancer, applies Kubernetes resource guardrails, generates traffic with k6, and uses Prometheus, Grafana, Alertmanager, Loki, and Promtail to observe infrastructure, container, Kubernetes, and application behaviour.
 
-The goal was not only to make the application run. The goal was to understand how the platform behaves when memory is exhausted, containers restart, healthy-looking pods return errors, and a worker node is drained while traffic is still running.
+The tests cover memory exhaustion, repeated container restarts, HTTP errors from pods that still appear healthy, and worker-node drain while traffic continues, showing how metrics, logs, events, dashboards, and alerts work together during troubleshooting.
 
 ## Project Goals
 
