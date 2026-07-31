@@ -45,7 +45,7 @@
                       "expr": "rate(http_requests_total{namespace=\"manual-managed\"}[1m])",
                       "instant": false,
                       "interval": "",
-                      "legendFormat": "{{pod}}",
+                      "legendFormat": "{{pod}} {{status}}",
                       "range": true
                     },
                     "version": "v0"
@@ -372,7 +372,7 @@
                     "kind": "DataQuery",
                     "spec": {
                       "editorMode": "code",
-                      "expr": "kube_pod_container_status_restarts_total{namespace=\"manual-managed\"}",
+                      "expr": "kube_pod_container_status_restarts_total{namespace=\"manual-managed\", pod=~\"podinfo.*\"}",
                       "legendFormat": "{{pod}}",
                       "range": true
                     },
@@ -676,7 +676,7 @@
       "1d"
     ],
     "fiscalYearStartMonth": 0,
-    "from": "now-15m",
+    "from": "now-5m",
     "hideTimepicker": false,
     "timezone": "utc",
     "to": "now"
