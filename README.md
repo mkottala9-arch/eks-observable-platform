@@ -1,20 +1,59 @@
 # EKS Observable Platform
 
-A hands-on Amazon EKS project for learning how Kubernetes behaves during memory pressure, application failures, and planned node maintenance.
+An Amazon EKS reliability and observability lab built to study how Kubernetes behaves beyond a successful deployment.
 
-The platform runs the `podinfo` sample application with resource guardrails, load testing, metrics, logs, dashboards, and alerting. Four controlled incidents were used to verify how the cluster behaves when something goes wrong.
+The project provisions a small EKS environment, runs the `podinfo` application behind an AWS Application Load Balancer, adds Kubernetes resource guardrails, collects infrastructure and application telemetry, generates traffic with k6, and then introduces controlled failures.
 
-## What This Project Covers
+The goal was not only to make the application run. The goal was to understand how the platform behaves when memory is exhausted, containers restart, healthy-looking pods return errors, and a worker node is drained while traffic is still running.
 
-- EKS infrastructure provisioned with Terraform
-- Two-replica `podinfo` application exposed through an AWS Application Load Balancer using the AWS Load Balancer Controller
-- CPU and memory requests and limits
-- Namespace `LimitRange` and `ResourceQuota`
-- `PodDisruptionBudget` for planned maintenance
-- Prometheus, Grafana, Alertmanager, Loki, and Promtail
-- Application metrics collected through a `ServiceMonitor`
-- k6 load testing from a separate namespace
-- Failure testing with memory stress, HTTP 500 injection, and node drain
+## Project Goals
+
+- Provision a repeatable EKS environment with Terraform
+- Deploy a two-replica application through an AWS Application Load Balancer
+- Protect workloads with requests, limits, `LimitRange`, `ResourceQuota`, and a `PodDisruptionBudget`
+- Collect node, container, Kubernetes object, application, and log data
+- Generate continuous traffic with k6 while failures are introduced
+- Use dashboards, alerts, events, and logs to investigate each failure
+- Document the observations, root cause, recovery, and lessons from every test
+
+## What Was Built
+
+| Area | Implementation |
+|---|---|
+| Infrastructure | VPC, public subnets, IAM roles, EKS cluster, and managed node group provisioned with Terraform |
+| Application | Two `podinfo` replicas running in the `manual-managed` namespace |
+| Traffic entry | AWS Load Balancer Controller with an Application Load Balancer in IP target mode |
+| Resource protection | CPU and memory requests and limits, `LimitRange`, `ResourceQuota`, and `PodDisruptionBudget` |
+| Observability | Prometheus, Grafana, Alertmanager, Loki, Promtail, kube-state-metrics, node-exporter, and cAdvisor |
+| Application monitoring | `podinfo` metrics collected through a `ServiceMonitor` |
+| Load generation | k6 running from the separate `k6-testing` namespace |
+| Failure testing | Memory pressure, container OOM, kubelet eviction, HTTP 500 injection, and node drain |
+
+## How the Project Evolved
+
+The platform was developed through four controlled experiments:
+
+1. **Establish the failure baseline**  
+   A pod without resource requests or limits attempted to allocate 6 GiB. Separate runs produced a container `OOMKilled` result and a kubelet `Evicted` result.
+
+2. **Add guardrails and alerting**  
+   Namespace policies and container limits were added. The same memory workload then failed inside its own cgroup boundary, while the node and application replicas remained stable. Prometheus detected the repeated restarts and moved the alert to `Firing`.
+
+3. **Test application health beyond Kubernetes health**  
+   HTTP 500 responses were injected while both `podinfo` replicas remained `Running` and `Ready`. Kubernetes health checks did not identify the user-facing failure, but application metrics showed it immediately.
+
+4. **Test planned disruption under load**  
+   A second worker node was added and the original node was drained while k6 traffic continued. The `PodDisruptionBudget` prevented both replicas from being disrupted together and allowed them to move one at a time.
+
+## What the Experiments Demonstrated
+
+- `OOMKilled` and kubelet eviction are different failure paths
+- Resource limits can contain a memory failure before it consumes the node
+- A pod can remain `Running` and `Ready` while the application serves errors
+- Application metrics are required for failures that Kubernetes object health cannot see
+- Connection reuse can hide a failing replica during load testing
+- A `PodDisruptionBudget` protects availability during voluntary disruptions
+- Metrics, logs, events, dashboards, and alerts provide different parts of the same incident story
 
 ## Architecture
 
@@ -94,7 +133,7 @@ Loki and Promtail collect container logs. Metrics show when and how much a servi
 
 ![Grafana dashboard showing HTTP 500 errors during fault injection](incidents/incident-03/grafana-monitoring.png)
 
-## Incident Reports
+## Failure Experiments and Results
 
 | Incident | Test | Result |
 |---|---|---|
@@ -170,10 +209,6 @@ Together, the incidents show why infrastructure health, Kubernetes state, applic
 - `kubectl`
 - Helm
 - `eksctl`
-
-
-
-
 
 ## Installation and Operations
 
