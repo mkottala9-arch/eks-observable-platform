@@ -1,0 +1,45 @@
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n manual-managed
+NAME                       READY   STATUS    RESTARTS   AGE
+podinfo-5db49c5bdf-4lhs9   1/1     Running   0          19m
+podinfo-5db49c5bdf-bjz49   1/1     Running   0          19m
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top nodes
+NAME                                        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+ip-10-0-0-133.ap-south-2.compute.internal   70m          3%       1810Mi          25%         
+krishna@Asus-ROG:~/eks-observable-platform$ date
+Fri Jul 31 07:36:40 UTC 2026
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl apply -f k8s/chaos/memory-hog-deployment.yaml
+deployment.apps/memory-hog created
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n manual-managed
+NAME                         READY   STATUS      RESTARTS     AGE
+memory-hog-f697f9d4d-8rdm2   0/1     OOMKilled   1 (4s ago)   9s
+podinfo-5db49c5bdf-4lhs9     1/1     Running     0            20m
+podinfo-5db49c5bdf-bjz49     1/1     Running     0            20m
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl describe pod -n manual-managed -l app=memory-hog | grep -A6 "Limits\|Requests"
+    Limits:
+      cpu:     500m
+      memory:  256Mi
+    Requests:
+      cpu:        50m
+      memory:     64Mi
+    Environment:  <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-4pplw (ro)
+Conditions:
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl top nodes
+NAME                                        CPU(cores)   CPU(%)   MEMORY(bytes)   MEMORY(%)   
+ip-10-0-0-133.ap-south-2.compute.internal   62m          3%       1820Mi          25%         
+krishna@Asus-ROG:~/eks-observable-platform$ kubectl get pods -n manual-managed -w
+NAME                         READY   STATUS      RESTARTS      AGE
+memory-hog-f697f9d4d-8rdm2   0/1     OOMKilled   4 (75s ago)   2m5s
+podinfo-5db49c5bdf-4lhs9     1/1     Running     0             22m
+podinfo-5db49c5bdf-bjz49     1/1     Running     0             22m
+memory-hog-f697f9d4d-8rdm2   0/1     CrashLoopBackOff   4 (88s ago)   3m20s
+memory-hog-f697f9d4d-8rdm2   1/1     Running            5 (89s ago)   3m21s
+memory-hog-f697f9d4d-8rdm2   0/1     OOMKilled          5 (90s ago)   3m22s
+memory-hog-f697f9d4d-8rdm2   0/1     CrashLoopBackOff   5 (76s ago)   4m38s
+^Ckrishna@Asus-ROG:~/eks-observable-platform$ kubectget pods -n manual-managed
+NAME                         READY   STATUS             RESTARTS       AGE
+memory-hog-f697f9d4d-8rdm2   0/1     CrashLoopBackOff   5 (2m4s ago)   5m26s
+podinfo-5db49c5bdf-4lhs9     1/1     Running            0              25m
+podinfo-5db49c5bdf-bjz49     1/1     Running            0              25m
+krishna@Asus-ROG:~/eks-observable-platform$ 
