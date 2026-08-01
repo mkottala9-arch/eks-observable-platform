@@ -1,6 +1,6 @@
 # Incident 02 — Guardrails and Monitoring
 
-> **Scenario:** `podinfo`, the sample application running on the cluster, remained healthy while the memory-hog test from Incident 01 was repeated with namespace guardrails and monitoring enabled.
+> **Scenario:** `podinfo`, the sample application running on the cluster, remained healthy while the memory-hog workload from Incident 01 was deployed as a Kubernetes Deployment with namespace guardrails and monitoring enabled. The repeated container restarts were then detected through Grafana and Prometheus alerting.
 
 Incident 02 repeated the same 6 GiB memory test from Incident 01.
 
@@ -15,13 +15,14 @@ The failure was contained to one container and detected automatically.
 
 ---
 
+
 ## Test Setup
 
 The memory hog ran as a Deployment instead of a one-time pod.
 
 A bare pod with `restartPolicy: Never` terminates once and leaves its restart count at zero. A Deployment restarts the failed container, creating a restart signal that can be monitored.
 
-The manifest intentionally declared no resources. The test was designed to confirm that the namespace policy would add defaults automatically.
+The manifest intentionally declared no resources. Kubernetes applied the namespace defaults automatically through the `LimitRange`.
 
 ---
 

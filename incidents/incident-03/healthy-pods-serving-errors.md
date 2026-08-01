@@ -2,9 +2,9 @@
 
 > **Scenario:** `podinfo`, the sample application running on the cluster, stayed `Running` and `Ready` while fault injection caused application requests to return HTTP 500 responses.
 
-This test checked whether application failure would be detected when Kubernetes still considered the pods healthy.
+This test demonstrated how application-level monitoring can detect user-facing failures even when pod status, readiness checks, and restart metrics remain normal.
 
-At peak, the service returned roughly **8,500 HTTP 500 responses per second**. Kubernetes health signals correctly showed that the pods and processes were still running, while the application error-rate metric detected that the responses themselves were failing.
+At peak, the service returned roughly **8,500 HTTP 500 responses per second**. Kubernetes health signals continued to show that the pods and processes were running normally, while the application error-rate metric revealed that the responses themselves were failing.
 
 ---
 
