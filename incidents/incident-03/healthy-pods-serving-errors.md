@@ -163,35 +163,35 @@ Without application monitoring, this partial failure would have been difficult t
 
 ---
 
-## Finding 2 — Recovery Did Not Immediately Rebalance Traffic
+## Finding 2 — Healthy Did Not Mean Traffic Was Reaching the Pod
 
-After fault injection was disabled, traffic remained concentrated on one pod.
+After fault injection was disabled, both pods were healthy again, but traffic remained concentrated on one replica.
 
-The existing connections were healthy again, so there was no reason for clients to reconnect. The recovered replica remained mostly idle until new connections were created.
+The existing client connections continued using the same pod, so the recovered replica received very little traffic. A manual request to the pod would have succeeded, but it would not have shown whether live application traffic was actually reaching that replica.
 
-Restarting the load generator redistributed traffic across both pods, confirming that the imbalance was connection-related.
+Restarting the load generator created new connections and redistributed requests across both pods, confirming that the imbalance was connection-related.
 
-Traffic may stay uneven until clients reconnect or new connections are created.
+This showed the value of monitoring request rate per replica. Pod health confirms that an application can serve requests, while application metrics confirm whether it is actually receiving and serving traffic.
 
 ---
 
 ## Observability Result
 
-Loki was queried after the test to check whether the HTTP 500 responses were also recorded in application logs.
+Loki was queried after the test to check the application logs available during the HTTP 500 failure.
 
-The query confirmed that `podinfo` logs lifecycle activity but does not emit one log entry for every request. This was useful because it showed that the logging pipeline was working as expected and that this particular failure belonged in application metrics rather than infrastructure or lifecycle logs.
+The query confirmed that `podinfo` was sending lifecycle logs through the Loki and Promtail pipeline. For this test, the application error-rate metric provided the main signal because `podinfo` did not emit one log entry for every request.
 
-| Signal | What it showed |
+| Signal | What It Showed |
 |---|---|
-| Kubernetes Events | Pods remained healthy from Kubernetes' perspective |
+| Kubernetes Events | The pods remained healthy from Kubernetes' perspective |
 | Readiness and liveness | The process and health endpoints continued to pass |
 | Container restarts | No container crash occurred |
-| Loki | Confirmed that no per-request error logs were emitted |
-| Application error-rate metric | Detected the HTTP 500 failure immediately |
+| Loki | Confirmed the logging pipeline and captured the application lifecycle logs |
+| Application error-rate metric | Detected the HTTP 500 responses immediately |
 
-Each signal had a different purpose. The error-rate metric showed that requests were failing, while Loki provided the application logs available for investigation.
+Each signal provided a different part of the incident. Application metrics showed when requests were failing and the scale of the failure, while Loki provided the logs emitted by the application.
 
-Metrics are useful for showing the size and timing of a problem. When the application writes detailed request or error logs, Loki can add the context that metrics cannot provide, such as the failed operation, error message, request details, or affected component. Together, metrics show what happened and logs help explain why.
+When request and error logging is enabled in the application, the same Loki pipeline can collect details such as failed operations, error messages, request information, and affected components. Together, metrics show what happened, while logs help explain why.
 
 ---
 
