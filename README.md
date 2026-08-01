@@ -1,10 +1,11 @@
 # EKS Observable Platform
 
-An Amazon EKS-based Kubernetes reliability and observability platform that demonstrates how workloads behave during real failures.
+An Amazon EKS-based Kubernetes reliability and observability platform that demonstrates how workloads behave under real failure conditions.
 
-The platform runs the podinfo application behind an AWS Application Load Balancer, applies Kubernetes resource guardrails, generates traffic with k6, and uses Prometheus, Grafana, Alertmanager, Loki, and Promtail to observe infrastructure, container, Kubernetes, and application behaviour.
+The platform runs the `podinfo` application behind an AWS Application Load Balancer, applies Kubernetes resource guardrails, generates traffic with k6, and uses Prometheus, Grafana, Alertmanager, Loki, and Promtail to provide visibility across infrastructure, containers, Kubernetes resources, and application behaviour.
 
-The tests cover memory exhaustion, repeated container restarts, HTTP errors from pods that still appear healthy, and worker-node drain while traffic continues, showing how metrics, logs, events, dashboards, and alerts work together during troubleshooting.
+The tests cover memory exhaustion, repeated container restarts, HTTP errors from pods that continue to appear healthy, and worker-node drain while traffic remains active. Together, they demonstrate how resource guardrails, metrics, logs, events, dashboards, and alerts help contain failures and support detection, investigation, and recovery.
+
 
 ## Project Goals
 
@@ -37,7 +38,7 @@ The platform was developed through four controlled experiments:
    A pod without resource requests or limits attempted to allocate 6 GiB. Separate runs produced a container `OOMKilled` result and a kubelet `Evicted` result.
 
 2. **Add guardrails and alerting**  
-   Namespace policies and container limits were added. The same memory workload then failed inside its own cgroup boundary, while the node and application replicas remained stable. Prometheus detected the repeated restarts and moved the alert to `Firing`.
+  Namespace policies and container limits were added to contain the memory failure within the workload. When the memory-hog container repeatedly exceeded its limit and restarted, Prometheus detected the restart activity and moved the alert to `Firing`, confirming that both the resource guardrails and alerting path worked as expected.
 
 3. **Test application health beyond Kubernetes health**  
    HTTP 500 responses were injected while both `podinfo` replicas remained `Running` and `Ready`. Kubernetes health checks did not identify the user-facing failure, but application metrics showed it immediately.
@@ -47,7 +48,7 @@ The platform was developed through four controlled experiments:
 
 ## What the Experiments Demonstrated
 
-- `OOMKilled` and kubelet eviction are different failure paths
+- An unbounded memory workload can end in either `OOMKilled` or kubelet eviction, depending on whether the container or node-level protection reacts first
 - Resource limits can contain a memory failure before it consumes the node
 - A pod can remain `Running` and `Ready` while the application serves errors
 - Application metrics are required for failures that Kubernetes object health cannot see
@@ -117,7 +118,7 @@ All four sources are collected. The pre-built dashboards shipped with `kube-prom
 
 The custom dashboards and alert in this project use `kube-state-metrics` and the application's own metrics.
 
-Loki and Promtail collect container logs. Metrics show when and how much a service is failing, while logs can provide the detailed context needed to understand why.
+Loki and Promtail collect container logs. During the HTTP fault-injection test, application metrics exposed the failure, while Loki confirmed that the logging pipeline was working.
 
 ### Monitoring Screenshots
 
@@ -132,6 +133,7 @@ Loki and Promtail collect container logs. Metrics show when and how much a servi
 **Grafana — application error monitoring during fault injection**
 
 ![Grafana dashboard showing HTTP 500 errors during fault injection](incidents/incident-03/grafana-monitoring.png)
+
 
 ## Failure Experiments and Results
 
