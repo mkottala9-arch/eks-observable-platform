@@ -3,8 +3,6 @@ name: oidc-test
 # manual only. throwaway - delete once it passes.
 on:
   workflow_dispatch:
-  push:
-    branches: [aws-foundation]
 
 permissions:
   id-token: write   # lets the workflow request an OIDC token from github
