@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.9.0"
+  required_version = ">= 1.10.0"
 
   # Stores terraform state in S3 instead of local disk.
   # use_lockfile -> native S3 locking (TF 1.10+), no DynamoDB table needed.
