@@ -12,7 +12,7 @@ resource "aws_iam_role" "ci" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:mkottala9-arch/eks-observable-platform:*"
+          "token.actions.githubusercontent.com:sub" = "${local.github_repo}:*"
         }
       }
     }]
