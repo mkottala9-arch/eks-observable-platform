@@ -1,0 +1,6 @@
+apiVersion: v2
+name: eks-observable-platform-app
+description: The demo application for the CI/CD pipeline
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

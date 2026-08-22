@@ -1,0 +1,11 @@
+replicaCount: 2
+
+app:
+  env: prod
+  faultMode: false
+
+serviceMonitor:
+  enabled: true
+
+ingress:
+  enabled: true
