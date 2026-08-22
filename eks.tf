@@ -60,6 +60,15 @@ resource "aws_eks_cluster" "main" {
   name     = local.project_name
   role_arn = aws_iam_role.eks_cluster.arn
 
+  access_config {
+    authentication_mode = "API_AND_CONFIG_MAP"
+
+    # already true from cluster creation - this is what gives the creating
+    # IAM user cluster-admin. omitting it reads as "remove it", which forces
+    # a full cluster replacement.
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   vpc_config {
     # both subnets, eks wants 2 AZs minimum for the control plane
     subnet_ids = aws_subnet.public[*].id
