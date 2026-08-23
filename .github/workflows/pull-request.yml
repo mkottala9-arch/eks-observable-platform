@@ -1,0 +1,78 @@
+name: pull-request
+
+on:
+  pull_request:
+    branches: [main]
+
+# no id-token, no aws credentials. this workflow proves things build and
+# pass, it never publishes or deploys anything.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: install dependencies
+        working-directory: application
+        run: pip install -r requirements-dev.txt
+
+      - name: run tests
+        working-directory: application
+        run: pytest -v
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # proves the image builds. nothing is pushed - the runner is
+      # destroyed and the image with it.
+      - name: build image
+        working-directory: application
+        run: |
+          docker build \
+            --build-arg APP_VERSION=pr-${{ github.event.pull_request.number }} \
+            --build-arg GIT_COMMIT=$(git rev-parse --short HEAD) \
+            -t app:pr .
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      # -backend=false skips S3 entirely, so no AWS credentials are needed.
+      # still downloads providers, so validate can check resource schemas.
+      - name: terraform validate
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - uses: azure/setup-helm@v4
+
+      - name: helm lint
+        run: |
+          helm lint ./application/helm -f ./application/helm/values-dev.yaml
+          helm lint ./application/helm -f ./application/helm/values-prod.yaml
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks scans history, needs the full clone
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
