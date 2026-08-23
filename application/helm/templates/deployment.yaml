@@ -6,6 +6,14 @@ metadata:
     app: {{ .Release.Name }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  # explicit rather than inherited. maxUnavailable: 0 means availability never
+  # dips below replicaCount - old pods keep serving until new ones are ready.
+  # absolute numbers, not percentages, so dev and prod behave identically.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app: {{ .Release.Name }}
@@ -14,10 +22,24 @@ spec:
       labels:
         app: {{ .Release.Name }}
     spec:
+      # pod-level: applies to every container in the pod.
+      # kubernetes REFUSES to start the container if it would run as root -
+      # this is enforcement, unlike the Dockerfile's USER which is only a default.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ required "image.tag is required" .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # container-level: overrides pod-level where they overlap
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 8080
               name: http
@@ -26,17 +48,37 @@ spec:
               value: {{ .Values.app.env | quote }}
             - name: FAULT_MODE
               value: {{ .Values.app.faultMode | quote }}
+          # startup probe suspends liveness and readiness until it passes once.
+          # 30 x 2s = 60s startup budget. after that, liveness takes over and
+          # can be aggressive because the app has already proven it booted.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          # 3 consecutive failures (30s) before restarting, so a brief blip
+          # doesn't kill a healthy pod.
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
-            initialDelaySeconds: 5
             periodSeconds: 10
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
-            initialDelaySeconds: 3
             periodSeconds: 5
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          # gunicorn writes a heartbeat temp file per worker, so it needs
+          # somewhere writable. this is the ONLY writable path - everything
+          # else stays read-only.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
