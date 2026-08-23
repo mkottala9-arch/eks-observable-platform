@@ -1,0 +1,24 @@
+image:
+  repository: 756808989597.dkr.ecr.ap-south-2.amazonaws.com/eks-observable-platform-app
+  tag: ""            # set by CI at deploy time
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+app:
+  env: dev
+  faultMode: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+serviceMonitor:
+  enabled: false
+
+ingress:
+  enabled: false
