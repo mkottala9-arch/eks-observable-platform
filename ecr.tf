@@ -1,7 +1,7 @@
 resource "aws_ecr_repository" "app" {
-  name = "${local.project_name}-app"
-
+  name                 = "${local.project_name}-app"
   image_tag_mutability = "IMMUTABLE"
+  force_delete         = true # lab: allow destroy with images present
 
   image_scanning_configuration {
     scan_on_push = true
