@@ -1,0 +1,54 @@
+name: release
+
+# only on version tags. never on merges to main.
+# publishing is a deliberate act: git tag v1.1.0 && git push origin v1.1.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  id-token: write   # required to request an OIDC token from github
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history INCLUDING TAGS, or git describe fails
+
+      - name: compute version and commit
+        id: meta
+        run: |
+          echo "version=$(git describe --tags)" >> $GITHUB_OUTPUT
+          echo "commit=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: assume the CI role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::756808989597:role/eks-observable-platform-ci
+          aws-region: ap-south-2
+
+      - name: log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: build and push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+        working-directory: application
+        run: |
+          IMAGE=$REGISTRY/eks-observable-platform-app:$VERSION
+
+          docker build \
+            --build-arg APP_VERSION=$VERSION \
+            --build-arg GIT_COMMIT=$COMMIT \
+            -t $IMAGE .
+
+          docker push $IMAGE
+
+          echo "pushed $IMAGE" >> $GITHUB_STEP_SUMMARY
