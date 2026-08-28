@@ -1,0 +1,55 @@
+# AmazonEKSEditPolicy covers built-in kubernetes resources only. ServiceMonitor
+# is a CRD installed by kube-prometheus-stack, so AWS's managed policy knows
+# nothing about it and grants no access.
+#
+# Applied by an admin at cluster setup time - the deploy roles are namespace
+# scoped and deliberately cannot grant themselves permissions.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: servicemonitor-editor
+  namespace: app-dev
+rules:
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-deploy-servicemonitor
+  namespace: app-dev
+subjects:
+  # must match the `username` field of the EKS access entry exactly
+  - kind: User
+    name: "arn:aws:sts::756808989597:assumed-role/eks-observable-platform-dev-deploy/{{SessionName}}"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: servicemonitor-editor
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: servicemonitor-editor
+  namespace: app-prod
+rules:
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["servicemonitors"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prod-deploy-servicemonitor
+  namespace: app-prod
+subjects:
+  - kind: User
+    name: "arn:aws:sts::756808989597:assumed-role/eks-observable-platform-prod-deploy/{{SessionName}}"
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: servicemonitor-editor
+  apiGroup: rbac.authorization.k8s.io
