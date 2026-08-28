@@ -55,3 +55,37 @@ jobs:
             --timeout 5m
 
           echo "deployed $VERSION to app-dev" >> $GITHUB_STEP_SUMMARY
+
+      # --wait above only proves pods reached Ready. it says nothing about
+      # whether the app actually works - a FAULT_MODE=true release passes it
+      # perfectly. this is the check that hits / like a real client.
+      - name: smoke test
+        run: |
+          NS=app-dev
+          TARGET="http://app-dev.$NS.svc.cluster.local:8080"
+
+          # job names must be unique, so clear any previous run
+          kubectl delete job k6-smoke -n $NS --ignore-not-found
+
+          # create-or-update, since the configmap may already exist
+          kubectl create configmap k6-smoke-script \
+            --from-file=k6/smoke.js -n $NS \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          sed "s|PLACEHOLDER|$TARGET|" k6/smoke-job.yaml \
+            | kubectl apply -n $NS -f -
+
+          # capture the result instead of letting a failure kill the step,
+          # so the logs still get printed below
+          kubectl wait --for=condition=complete job/k6-smoke -n $NS --timeout=120s \
+            && RESULT=pass || RESULT=fail
+
+          echo "--- k6 output ---"
+          kubectl logs job/k6-smoke -n $NS
+
+          if [ "$RESULT" = "fail" ]; then
+            echo "::error::smoke test failed - the deployed release is not serving correctly"
+            exit 1
+          fi
+
+          echo "smoke test passed" >> $GITHUB_STEP_SUMMARY
