@@ -1,0 +1,57 @@
+name: deploy-dev
+
+# chained to release. runs only after release.yml completes.
+# a merge to main alone doesn't deploy - there'd be no new image to deploy.
+on:
+  workflow_run:
+    workflows: ["release"]
+    types: [completed]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # workflow_run fires whether the upstream succeeded OR failed,
+    # so this guard is required - without it a failed build would deploy.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # checkout the commit release.yml built, not the tip of main
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: resolve the version that was just released
+        id: meta
+        run: echo "version=$(git describe --tags)" >> $GITHUB_OUTPUT
+
+      - name: assume the dev-deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::756808989597:role/eks-observable-platform-dev-deploy
+          aws-region: ap-south-2
+
+      - name: build kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ap-south-2 \
+            --name eks-observable-platform
+
+      - uses: azure/setup-helm@v4
+
+      - name: deploy
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          helm upgrade --install app-dev ./application/helm \
+            -f ./application/helm/values-dev.yaml \
+            --set image.tag=$VERSION \
+            --namespace app-dev \
+            --wait \
+            --timeout 5m
+
+          echo "deployed $VERSION to app-dev" >> $GITHUB_STEP_SUMMARY
