@@ -48,6 +48,11 @@ spec:
               value: {{ .Values.app.env | quote }}
             - name: FAULT_MODE
               value: {{ .Values.app.faultMode | quote }}
+          # timeoutSeconds: 3 on all three. the kubernetes default is 1s, which
+          # killed a healthy dev pod twice - a single gunicorn sync worker
+          # handles one request at a time, so a /metrics scrape or a slow
+          # request can push a probe past a 1s deadline.
+          #
           # startup probe suspends liveness and readiness until it passes once.
           # 30 x 2s = 60s startup budget. after that, liveness takes over and
           # can be aggressive because the app has already proven it booted.
@@ -57,6 +62,7 @@ spec:
               port: http
             failureThreshold: 30
             periodSeconds: 2
+            timeoutSeconds: 3
           # 3 consecutive failures (30s) before restarting, so a brief blip
           # doesn't kill a healthy pod.
           livenessProbe:
@@ -65,12 +71,14 @@ spec:
               port: http
             periodSeconds: 10
             failureThreshold: 3
+            timeoutSeconds: 3
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
             periodSeconds: 5
             failureThreshold: 3
+            timeoutSeconds: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           # gunicorn writes a heartbeat temp file per worker, so it needs

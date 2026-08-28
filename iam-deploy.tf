@@ -65,6 +65,9 @@ data "aws_iam_policy_document" "deploy" {
       "ecr:BatchGetImage",
       "ecr:GetDownloadUrlForLayer",
       "ecr:BatchCheckLayerAvailability",
+      # used to verify a promoted tag exists before deploying it,
+      # rather than discovering the typo as an ImagePullBackOff
+      "ecr:DescribeImages",
     ]
     resources = [aws_ecr_repository.app.arn]
   }
