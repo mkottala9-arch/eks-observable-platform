@@ -223,3 +223,4 @@ The complete installation, rebuild, ingress, load-testing, and teardown steps ar
 - Loki persistence is disabled.
 - Grafana has no persistent volume, so the custom dashboard is imported again after a rebuild.
 - This is a learning platform, not a production reference architecture.
+junk
