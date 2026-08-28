@@ -19,6 +19,18 @@ jobs:
         with:
           fetch-depth: 0   # full history INCLUDING TAGS, or git describe fails
 
+      # the trigger can't filter "tags on main" - branches and tags are
+      # separate filters and combining them means OR, not AND. so the check
+      # happens here instead: refuse to publish anything that didn't go
+      # through a PR into main.
+      - name: refuse tags not on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::tagged commit is not on main - refusing to build"
+            exit 1
+          fi
+
       - name: compute version and commit
         id: meta
         run: |
