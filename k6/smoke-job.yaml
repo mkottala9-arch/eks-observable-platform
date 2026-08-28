@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-smoke
+spec:
+  # don't retry. a failed smoke test means the deploy is bad -
+  # retrying would just delay the verdict.
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:latest
+          args: ["run", "/scripts/smoke.js"]
+          env:
+            - name: TARGET
+              value: "PLACEHOLDER"   # replaced by the workflow
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: script
+          configMap:
+            name: k6-smoke-script
