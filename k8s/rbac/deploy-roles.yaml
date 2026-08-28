@@ -3,7 +3,11 @@
 # nothing about it and grants no access.
 #
 # Applied by an admin at cluster setup time - the deploy roles are namespace
-# scoped and deliberately cannot grant themselves permissions.
+# scoped and deliberately cannot create RBAC objects. a role that can grant
+# permissions can escalate itself.
+#
+# The subject is the GROUP set in the access entry's kubernetes_groups, not the
+# username. usernames contain the session name, which changes per assume-role.
 
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -18,12 +22,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: dev-deploy-servicemonitor
+  name: app-deployers-servicemonitor
   namespace: app-dev
 subjects:
-  # must match the `username` field of the EKS access entry exactly
-  - kind: User
-    name: "arn:aws:sts::756808989597:assumed-role/eks-observable-platform-dev-deploy/{{SessionName}}"
+  - kind: Group
+    name: app-deployers
     apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: Role
@@ -43,11 +46,11 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: prod-deploy-servicemonitor
+  name: app-deployers-servicemonitor
   namespace: app-prod
 subjects:
-  - kind: User
-    name: "arn:aws:sts::756808989597:assumed-role/eks-observable-platform-prod-deploy/{{SessionName}}"
+  - kind: Group
+    name: app-deployers
     apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: Role
