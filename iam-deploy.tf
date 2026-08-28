@@ -59,7 +59,7 @@ data "aws_iam_policy_document" "deploy" {
     resources = ["*"]
   }
 
-    statement {
+  statement {
     effect = "Allow"
     actions = [
       "ecr:BatchGetImage",
