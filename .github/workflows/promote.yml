@@ -1,0 +1,120 @@
+name: promote
+
+# manual only. you choose which tested version goes to prod.
+# nothing is built here - the image already exists, verified in dev.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to promote to prod (e.g. v1.4.0)'
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    # this line is what makes github pause for approval. and because
+    # prod-deploy's trust policy requires sub to contain
+    # environment:production, removing it wouldn't skip the gate - it would
+    # produce a token AWS refuses.
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: assume the prod-deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::756808989597:role/eks-observable-platform-prod-deploy
+          aws-region: ap-south-2
+
+      # fail early if the tag doesn't exist, rather than discovering it
+      # as an ImagePullBackOff after the deploy has already started.
+      - name: verify the image exists in ECR
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          aws ecr describe-images \
+            --repository-name eks-observable-platform-app \
+            --region ap-south-2 \
+            --image-ids imageTag=$TAG \
+            > /dev/null
+          echo "image $TAG found in ECR"
+
+      - name: build kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ap-south-2 \
+            --name eks-observable-platform
+
+      - uses: azure/setup-helm@v4
+
+      - name: deploy to prod
+        env:
+          TAG: ${{ inputs.image_tag }}
+        run: |
+          helm upgrade --install app-prod ./application/helm \
+            -f ./application/helm/values-prod.yaml \
+            --set image.tag=$TAG \
+            --namespace app-prod \
+            --wait \
+            --timeout 5m
+
+          echo "deployed $TAG to app-prod" >> $GITHUB_STEP_SUMMARY
+
+      # fast fail. 20 seconds. if the release is fundamentally broken we
+      # find out now rather than after three minutes of load testing.
+      - name: smoke test
+        run: |
+          NS=app-prod
+          TARGET="http://app-prod.$NS.svc.cluster.local:8080"
+
+          kubectl delete job k6-smoke -n $NS --ignore-not-found
+
+          kubectl create configmap k6-smoke-script \
+            --from-file=k6/smoke.js -n $NS \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          sed "s|PLACEHOLDER|$TARGET|" k6/smoke-job.yaml | kubectl apply -n $NS -f -
+
+          kubectl wait --for=condition=complete job/k6-smoke -n $NS --timeout=120s \
+            && RESULT=pass || RESULT=fail
+
+          echo "--- k6 smoke output ---"
+          kubectl logs job/k6-smoke -n $NS
+
+          if [ "$RESULT" = "fail" ]; then
+            echo "::error::smoke test failed"
+            exit 1
+          fi
+
+      # sustained traffic. catches degradation a 20s check would miss,
+      # and produces a visible error curve in grafana if things go wrong.
+      - name: load test
+        run: |
+          NS=app-prod
+          TARGET="http://app-prod.$NS.svc.cluster.local:8080"
+
+          kubectl delete job k6-load -n $NS --ignore-not-found
+
+          kubectl create configmap k6-load-script \
+            --from-file=k6/load.js -n $NS \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          sed "s|PLACEHOLDER|$TARGET|" k6/load-job.yaml | kubectl apply -n $NS -f -
+
+          kubectl wait --for=condition=complete job/k6-load -n $NS --timeout=360s \
+            && RESULT=pass || RESULT=fail
+
+          echo "--- k6 load output ---"
+          kubectl logs job/k6-load -n $NS
+
+          if [ "$RESULT" = "fail" ]; then
+            echo "::error::load test failed"
+            exit 1
+          fi
+
+          echo "load test passed" >> $GITHUB_STEP_SUMMARY
