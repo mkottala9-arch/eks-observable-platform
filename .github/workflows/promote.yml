@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag to promote to prod (e.g. v1.4.0)'
+        description: 'Image tag to promote to prod (e.g. v1.5.0)'
         required: true
 
 permissions:
@@ -52,6 +52,22 @@ jobs:
 
       - uses: azure/setup-helm@v4
 
+      # record the current revision before changing anything, so the rollback
+      # step can report what it reverted to.
+      - name: record current revision
+        id: before
+        run: |
+          REV=$(helm list -n app-prod -o json \
+            | jq -r '.[] | select(.name=="app-prod") | .revision' || echo "none")
+          echo "revision=$REV" >> $GITHUB_OUTPUT
+          echo "current revision: $REV"
+
+      # --atomic handles FAILURE A: the rollout itself fails. bad image,
+      # crash on startup, pods never Ready. helm reverts automatically.
+      #
+      # it does NOT handle FAILURE B: rollout succeeds but the app is broken.
+      # a FAULT_MODE=true release passes --atomic perfectly - pods ready,
+      # probes green. only the k6 gates below see that.
       - name: deploy to prod
         env:
           TAG: ${{ inputs.image_tag }}
@@ -60,6 +76,7 @@ jobs:
             -f ./application/helm/values-prod.yaml \
             --set image.tag=$TAG \
             --namespace app-prod \
+            --atomic \
             --wait \
             --timeout 5m
 
@@ -68,6 +85,7 @@ jobs:
       # fast fail. 20 seconds. if the release is fundamentally broken we
       # find out now rather than after three minutes of load testing.
       - name: smoke test
+        id: smoke
         run: |
           NS=app-prod
           TARGET="http://app-prod.$NS.svc.cluster.local:8080"
@@ -94,6 +112,7 @@ jobs:
       # sustained traffic. catches degradation a 20s check would miss,
       # and produces a visible error curve in grafana if things go wrong.
       - name: load test
+        id: load
         run: |
           NS=app-prod
           TARGET="http://app-prod.$NS.svc.cluster.local:8080"
@@ -118,3 +137,22 @@ jobs:
           fi
 
           echo "load test passed" >> $GITHUB_STEP_SUMMARY
+
+      # FAILURE B recovery. scoped to the k6 steps specifically - if the
+      # deploy step failed instead, --atomic has already reverted and rolling
+      # back again would undo a good release.
+      - name: rollback on validation failure
+        if: failure() && (steps.smoke.outcome == 'failure' || steps.load.outcome == 'failure')
+        run: |
+          echo "::warning::validation failed - rolling back app-prod"
+
+          helm rollback app-prod -n app-prod --wait --timeout 5m
+
+          NOW=$(helm list -n app-prod -o json \
+            | jq -r '.[] | select(.name=="app-prod") | .revision')
+
+          echo "rolled back from revision ${{ steps.before.outputs.revision }} to $NOW" \
+            >> $GITHUB_STEP_SUMMARY
+
+          kubectl get pods -n app-prod
+          helm history app-prod -n app-prod
