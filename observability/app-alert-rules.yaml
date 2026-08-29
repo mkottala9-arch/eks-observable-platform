@@ -1,0 +1,58 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: app-alerts
+  namespace: monitoring
+  labels:
+    # same mechanism as the ServiceMonitor - the operator only picks up rules
+    # carrying its release label. without this, prometheus never loads them.
+    release: kps
+spec:
+  groups:
+    - name: app.rules
+      rules:
+        # the SLO breach. this is the one that would fire during incident 05.
+        - alert: AppHighErrorRate
+          expr: |
+            sum by (namespace) (rate(app_requests_total{path="/", status=~"5.."}[5m]))
+            /
+            sum by (namespace) (rate(app_requests_total{path="/"}[5m]))
+            > 0.01
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "More than 1% of requests to / are failing in {{ $labels.namespace }}"
+            description: "Error rate has been above 1% for 2 minutes. Check whether a recent release introduced a fault."
+
+        - alert: AppHighLatency
+          expr: |
+            histogram_quantile(0.95,
+              sum by (le, namespace) (rate(app_request_latency_seconds_bucket{path="/"}[5m]))
+            ) > 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "p95 latency above 1s in {{ $labels.namespace }}"
+            description: "The app is responding but slowly. Check resource limits and CPU throttling."
+
+        # fault mode should never be on outside a deliberate test.
+        - alert: AppFaultModeEnabled
+          expr: app_fault_mode > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Fault mode is enabled in {{ $labels.namespace }}"
+            description: "A release was deployed with FAULT_MODE=true. This is a bad release configuration."
+
+        - alert: AppPodRestarting
+          expr: |
+            increase(kube_pod_container_status_restarts_total{namespace=~"app-.*"}[10m]) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ $labels.pod }} restarted in {{ $labels.namespace }}"
+            description: "Check for OOM kills or probe timeouts."
