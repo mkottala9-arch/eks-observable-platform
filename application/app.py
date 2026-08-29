@@ -1,5 +1,6 @@
 import os
 import time
+
 from flask import Flask, Response, request
 from prometheus_client import (
     Counter,
@@ -19,17 +20,31 @@ GIT_COMMIT = os.environ.get("GIT_COMMIT", "unknown")
 APP_ENV = os.environ.get("APP_ENV", "unknown")
 FAULT_MODE = os.environ.get("FAULT_MODE", "false").lower() == "true"
 
+# the only paths this app serves. anything else - and on a public ALB that
+# means constant bot scanning for /1.php and friends - is recorded as "other".
+# without this, every scanned URL becomes its own time series and prometheus
+# storage grows without bound.
+KNOWN_PATHS = {"/", "/healthz", "/readyz", "/version", "/metrics"}
+
+
+def normalise_path(path):
+    return path if path in KNOWN_PATHS else "other"
+
+
 # ---------- metrics ----------
+# label is "path", not "endpoint" - prometheus adds its own "endpoint" label
+# when scraping via a ServiceMonitor, and the collision renames ours to
+# "exported_endpoint", which makes every query uglier.
 
 REQUEST_COUNT = Counter(
     "app_requests_total",
     "Total HTTP requests",
-    ["method", "endpoint", "status"],
+    ["method", "path", "status"],
 )
 REQUEST_LATENCY = Histogram(
     "app_request_latency_seconds",
     "Request latency in seconds",
-    ["endpoint"],
+    ["path"],
 )
 BUILD_INFO = Gauge(
     "app_build_info",
@@ -62,10 +77,11 @@ def start_timer():
 @app.after_request
 def record_metrics(response):
     latency = time.perf_counter() - request.start_time
-    REQUEST_LATENCY.labels(endpoint=request.path).observe(latency)
+    path = normalise_path(request.path)
+    REQUEST_LATENCY.labels(path=path).observe(latency)
     REQUEST_COUNT.labels(
         method=request.method,
-        endpoint=request.path,
+        path=path,
         status=response.status_code,
     ).inc()
     return response
