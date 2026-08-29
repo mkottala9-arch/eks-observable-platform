@@ -83,15 +83,19 @@ Request traffic continued while p95 latency remained almost unchanged at about `
 
 ## Alerting Result
 
-Prometheus detected the same failure through the application error-rate alert:
+Prometheus detected the application failure through the HTTP error-rate alert:
 
 ![Prometheus showing AppHighErrorRate firing](prometheus-alert-error-rate.png)
 
-`AppHighErrorRate` moved to `Firing` for `app-prod` after the error ratio remained above its threshold. The captured value was approximately `0.99`, meaning roughly 99% of requests in the alert calculation were failing.
+`AppHighErrorRate` moved to `Firing` for `app-prod` as the HTTP 500 ratio increased. The captured value was approximately `0.99`, meaning roughly 99% of requests in the alert calculation were failing.
 
-A separate `AppPodRestarting` alert was also visible during the capture, but it referenced an older `v1.7.1` pod and was not used as evidence of the `v1.8.0` failure.
+The application also exposed its fault-mode state as a metric. Prometheus alert history shows `AppFaultModeEnabled` moving through `Pending` and into `Firing` while the affected pods were running with fault mode enabled:
 
-`AppFaultModeEnabled` was `Inactive` in the captured Prometheus page. By the time that screenshot was taken, the Grafana dashboard showed that fault mode had already returned to `0`, so the screenshot alone does not establish whether that alert entered `Firing` earlier in the incident.
+![Prometheus showing AppFaultModeEnabled firing](prometheus-alert-fault-mode.png)
+
+This provided a second application-level signal alongside the HTTP error-rate alert: one showed the user-facing impact, while the other identified that fault mode was active in the affected pods.
+
+After rollback, the application alerts returned to `Inactive`.
 
 
 ---
