@@ -2,7 +2,7 @@ replicaCount: 2
 
 app:
   env: prod
-  faultMode: false
+  faultMode: true
 
 serviceMonitor:
   enabled: true
