@@ -264,8 +264,8 @@ data:
                           "kind": "DataQuery",
                           "spec": {
                             "editorMode": "code",
-                            "expr": "sum by (path) (rate(app_requests_total{namespace=\"app-prod\"}[1m]))",
-                            "legendFormat": "{{path}}",
+                            "expr": "sum by (status) (rate(app_requests_total{namespace=\"app-prod\", path=\"/\"}[1m]))",
+                            "legendFormat": "{{status}}",
                             "range": true
                           },
                           "version": "v0"
@@ -339,7 +339,23 @@ data:
                         ]
                       }
                     },
-                    "overrides": []
+                    "overrides": [
+                      {
+                        "matcher": {
+                          "id": "byName",
+                          "options": "500"
+                        },
+                        "properties": [
+                          {
+                            "id": "color",
+                            "value": {
+                              "fixedColor": "semi-dark-red",
+                              "mode": "fixed"
+                            }
+                          }
+                        ]
+                      }
+                    ]
                   },
                   "options": {
                     "legend": {
@@ -494,7 +510,7 @@ data:
                           "spec": {
                             "editorMode": "code",
                             "expr": "app_build_info{namespace=\"app-prod\"}",
-                            "legendFormat": "{{version}} ({{commit}})",
+                            "legendFormat": "{{version}}",
                             "range": true
                           },
                           "version": "v0"
@@ -512,51 +528,25 @@ data:
               "links": [],
               "title": "Deployed Version",
               "vizConfig": {
-                "group": "timeseries",
+                "group": "state-timeline",
                 "kind": "VizConfig",
                 "spec": {
                   "fieldConfig": {
                     "defaults": {
                       "color": {
-                        "mode": "palette-classic",
-                        "seriesBy": "max"
+                        "mode": "palette-classic-by-name"
                       },
                       "custom": {
-                        "axisBorderShow": false,
-                        "axisCenteredZero": false,
-                        "axisColorMode": "text",
-                        "axisLabel": "",
                         "axisPlacement": "auto",
-                        "barAlignment": 0,
-                        "barWidthFactor": 0.9,
-                        "drawStyle": "line",
-                        "fillOpacity": 0,
-                        "gradientMode": "none",
+                        "fillOpacity": 56,
                         "hideFrom": {
                           "legend": false,
                           "tooltip": false,
                           "viz": false
                         },
                         "insertNulls": false,
-                        "lineInterpolation": "linear",
-                        "lineStyle": {
-                          "fill": "solid"
-                        },
-                        "lineWidth": 1,
-                        "pointSize": 1,
-                        "scaleDistribution": {
-                          "type": "linear"
-                        },
-                        "showPoints": "always",
-                        "showValues": false,
-                        "spanNulls": false,
-                        "stacking": {
-                          "group": "A",
-                          "mode": "none"
-                        },
-                        "thresholdsStyle": {
-                          "mode": "off"
-                        }
+                        "lineWidth": 3,
+                        "spanNulls": true
                       },
                       "thresholds": {
                         "mode": "absolute",
@@ -575,12 +565,15 @@ data:
                     "overrides": []
                   },
                   "options": {
+                    "alignValue": "left",
                     "legend": {
-                      "calcs": [],
                       "displayMode": "list",
                       "placement": "bottom",
-                      "showLegend": true
+                      "showLegend": false
                     },
+                    "mergeValues": true,
+                    "rowHeight": 0.9,
+                    "showValue": "never",
                     "tooltip": {
                       "hideZeros": false,
                       "mode": "single",
@@ -636,7 +629,8 @@ data:
                   "fieldConfig": {
                     "defaults": {
                       "color": {
-                        "mode": "palette-classic"
+                        "mode": "palette-classic",
+                        "seriesBy": "max"
                       },
                       "custom": {
                         "axisBorderShow": false,
@@ -645,9 +639,9 @@ data:
                         "axisLabel": "",
                         "axisPlacement": "auto",
                         "barAlignment": 0,
-                        "barWidthFactor": 0.6,
+                        "barWidthFactor": 0.9,
                         "drawStyle": "line",
-                        "fillOpacity": 0,
+                        "fillOpacity": 50,
                         "gradientMode": "none",
                         "hideFrom": {
                           "legend": false,
@@ -655,18 +649,21 @@ data:
                           "viz": false
                         },
                         "insertNulls": false,
-                        "lineInterpolation": "stepAfter",
-                        "lineWidth": 1,
-                        "pointSize": 5,
+                        "lineInterpolation": "linear",
+                        "lineStyle": {
+                          "fill": "solid"
+                        },
+                        "lineWidth": 2,
+                        "pointSize": 1,
                         "scaleDistribution": {
                           "type": "linear"
                         },
-                        "showPoints": "auto",
+                        "showPoints": "always",
                         "showValues": false,
                         "spanNulls": false,
                         "stacking": {
                           "group": "A",
-                          "mode": "none"
+                          "mode": "normal"
                         },
                         "thresholdsStyle": {
                           "mode": "off"
@@ -800,7 +797,7 @@ data:
             "1d"
           ],
           "fiscalYearStartMonth": 0,
-          "from": "now-6h",
+          "from": "now-1h",
           "hideTimepicker": false,
           "timezone": "browser",
           "to": "now"
