@@ -14,7 +14,7 @@ The result is a single project that covers both sides of operating workloads on 
 - Use **GitHub Actions OIDC** and separate CI/dev/prod IAM roles so deployments use short-lived AWS credentials instead of stored access keys
 - Store immutable application images in **Amazon ECR** and promote the same tested image from development to production
 - Validate releases with **k6 smoke and load tests** after deployment instead of relying only on Kubernetes rollout health
-- Automatically recover from failed production validation by restoring the **recorded healthy Helm revision**, or removing a failed first release when no previous production revision exists
+- Harden production promotion by **serializing concurrent promotions**, restoring the **recorded healthy Helm revision** when validation fails, and removing a failed first release when no previous production revision exists
 - Build a full **observability stack with Prometheus, Grafana, Alertmanager, Loki, and Promtail** for infrastructure, Kubernetes, container, application, and log visibility
 - Expose custom application metrics for **success ratio, HTTP errors, latency, deployed version, and fault mode**, and use them in dashboards and Prometheus alerts
 - Test the platform through controlled incidents covering **memory pressure, OOM and eviction, resource guardrails, HTTP 500 failures, node drain, release failure, and automated recovery**
@@ -98,6 +98,8 @@ The VPC contains two public subnets across two Availability Zones for EKS. The m
 ### Release and Rollback Flow
 
 ![Application release and rollback flow](docs/release-and-rollback-flow.png)
+
+The diagram shows the normal recovery branch as a Helm rollback. The current workflow also covers two promotion edge cases: production promotions are serialized so two workflows cannot modify `app-prod` concurrently, and a failed first-ever production release is uninstalled because no previous Helm revision exists to restore.
 
 The same versioned image is promoted rather than rebuilt for production. Continuous monitoring observes the application after deployment, while automated rollback is owned by the production promotion workflow when its validation gates fail.
 
@@ -268,6 +270,19 @@ The first-ever production deployment is handled separately. If its validation fa
 The production promotion workflow uses a concurrency group with `cancel-in-progress: false`, which ensures only one promotion can modify `app-prod` at a time. This keeps the recorded rollback target deterministic throughout deployment and validation.
 
 In both cases the GitHub Actions workflow remains failed, so the rejected promotion stays visible in CI/CD history.
+
+### Promotion Edge Cases Covered
+
+The production workflow explicitly handles the main states around deployment and recovery:
+
+| Situation | Behaviour |
+|---|---|
+| Rollout cannot become healthy | Helm `--atomic --wait` owns the failure and reverts the rollout |
+| Rollout succeeds but smoke/load validation fails | GitHub Actions restores the exact healthy Helm revision recorded before deployment |
+| First-ever production release fails validation | No previous revision exists, so the failed `app-prod` release is uninstalled |
+| Two production promotions are triggered close together | The `app-prod-promotion` concurrency group allows only one to run; the later promotion waits |
+| Runtime alert fires outside a promotion | Prometheus/Alertmanager provide detection only; monitoring alerts do not trigger rollback |
+
 
 ![GitHub Actions showing failed validation and automated rollback](incidents/incident-05/github-actions-rollback.png)
 
