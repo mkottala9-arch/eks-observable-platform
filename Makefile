@@ -18,13 +18,13 @@ help:  ## Show this help
 # ---------- infrastructure ----------
 
 init:  ## terraform init
-	terraform init
+	terraform -chdir=terraform init
 
 plan:  ## terraform plan
-	terraform plan
+	terraform -chdir=terraform plan
 
 apply:  ## Create the cluster and supporting AWS resources
-	terraform apply
+	terraform -chdir=terraform apply
 
 kubeconfig:  ## Point kubectl at the cluster
 	aws eks update-kubeconfig --region $(REGION) --name $(CLUSTER)
@@ -125,7 +125,7 @@ test:  ## Run the application unit tests
 
 lint:  ## Run the same checks as the pull-request workflow
 	terraform fmt -check -recursive
-	terraform validate
+	terraform -chdir=terraform validate
 	helm lint $(CHART) -f $(CHART)/values-dev.yaml
 	helm lint $(CHART) -f $(CHART)/values-prod.yaml
 
@@ -133,9 +133,9 @@ lint:  ## Run the same checks as the pull-request workflow
 # same file works for whichever namespace is being tested.
 smoke:  ## Run the k6 smoke test (NS=app-prod by default)
 	kubectl delete job k6-smoke -n $(NS) --ignore-not-found
-	kubectl create configmap k6-smoke-script --from-file=k6/smoke.js -n $(NS) \
+	kubectl create configmap k6-smoke-script --from-file=k6/app/smoke.js -n $(NS) \
 	  --dry-run=client -o yaml | kubectl apply -f -
-	sed "s|PLACEHOLDER|http://$(NS).$(NS).svc.cluster.local:8080|" k6/smoke-job.yaml \
+	sed "s|PLACEHOLDER|http://$(NS).$(NS).svc.cluster.local:8080|" k6/app/smoke-job.yaml \
 	  | kubectl apply -n $(NS) -f -
 	kubectl wait --for=condition=complete job/k6-smoke -n $(NS) --timeout=120s \
 	  && RESULT=pass || RESULT=fail; \
@@ -144,9 +144,9 @@ smoke:  ## Run the k6 smoke test (NS=app-prod by default)
 
 load:  ## Run the k6 load test (NS=app-prod by default)
 	kubectl delete job k6-load -n $(NS) --ignore-not-found
-	kubectl create configmap k6-load-script --from-file=k6/load.js -n $(NS) \
+	kubectl create configmap k6-load-script --from-file=k6/app/load.js -n $(NS) \
 	  --dry-run=client -o yaml | kubectl apply -f -
-	sed "s|PLACEHOLDER|http://$(NS).$(NS).svc.cluster.local:8080|" k6/load-job.yaml \
+	sed "s|PLACEHOLDER|http://$(NS).$(NS).svc.cluster.local:8080|" k6/app/load-job.yaml \
 	  | kubectl apply -n $(NS) -f -
 	kubectl wait --for=condition=complete job/k6-load -n $(NS) --timeout=360s \
 	  && RESULT=pass || RESULT=fail; \
@@ -156,9 +156,9 @@ load:  ## Run the k6 load test (NS=app-prod by default)
 load-podinfo:  ## Project 1 load test against podinfo
 	kubectl create namespace k6-testing --dry-run=client -o yaml | kubectl apply -f -
 	kubectl delete pod k6-load -n k6-testing --ignore-not-found
-	kubectl create configmap k6-script --from-file=k6/load-test.js -n k6-testing \
+	kubectl create configmap k6-script --from-file=k6/podinfo/load-test.js -n k6-testing \
 	  --dry-run=client -o yaml | kubectl apply -f -
-	kubectl apply -f k6/k6-job.yaml
+	kubectl apply -f k6/podinfo/k6-job.yaml
 	kubectl logs -f k6-load -n k6-testing
 
 # ---------- chaos ----------
@@ -216,4 +216,4 @@ destroy: clean-ingress  ## Ordered teardown: ALBs, then eksctl stack, then terra
 	-eksctl delete iamserviceaccount \
 	  --cluster=$(CLUSTER) --region=$(REGION) \
 	  --namespace=kube-system --name=aws-load-balancer-controller
-	terraform destroy
+	terraform -chdir=terraform destroy
