@@ -2,8 +2,9 @@
 
 Cluster: `eks-observable-platform`, region `ap-south-2`.
 
-Terraform lives in `terraform/` and is always run manually from a laptop. Only
-application delivery is automated — the pipeline never touches infrastructure.
+Terraform provisioning, `apply`, and `destroy` are run manually from a laptop.
+GitHub Actions validates the Terraform configuration in pull requests, but the
+pipeline never changes infrastructure; application delivery is automated.
 
 Most steps below have a Makefile target, noted alongside. The commands are kept
 here in full because this file explains why each one is needed; the Makefile
@@ -51,14 +52,22 @@ eksctl delete iamserviceaccount \
   --cluster=eks-observable-platform --region=ap-south-2 \
   --namespace=kube-system --name=aws-load-balancer-controller
 
+# eksctl also created the cluster-specific IAM OIDC provider used by IRSA.
+# Capture its ARN from the live cluster and delete it before the cluster goes.
+ISSUER=$(aws eks describe-cluster --name eks-observable-platform \
+  --region ap-south-2 --query "cluster.identity.oidc.issuer" --output text)
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+OIDC_ARN="arn:aws:iam::$ACCOUNT_ID:oidc-provider/${ISSUER#https://}"
+aws iam delete-open-id-connect-provider --open-id-connect-provider-arn "$OIDC_ARN"
+
 terraform -chdir=terraform destroy
 ```
 
 `make destroy` does all of the above, refuses to run Terraform while any load
-balancer remains, and stops before `terraform destroy` if
-`eksctl delete iamserviceaccount` fails for any reason other than the service
-account already being gone — rather than silently ignoring the failure and
-hitting the exact ordering problem this section exists to describe.
+balancer remains, stops on a genuine `eksctl delete iamserviceaccount` failure,
+and removes the EKS cluster's IRSA OIDC provider before Terraform deletes the
+cluster. The Terraform-managed GitHub Actions OIDC provider is a separate
+resource and is left for `terraform destroy`.
 
 `make verify` reports load balancers and non-default security groups still
 present in the VPC (this includes EKS-managed groups, not only the
@@ -66,11 +75,12 @@ controller's), and is worth running before and after a teardown.
 
 ## Orphaned resources after a failed teardown
 
-Three classes of resource are created outside Terraform's graph by components
-that need a live cluster to clean up after themselves. Destroy the cluster
-first and all three strand, each blocking the next stage of the teardown.
+Several resources are created outside Terraform's graph. The load balancers
+and their security-group/ENI dependencies can block VPC teardown, while the
+eksctl CloudFormation stack and the cluster-specific IAM OIDC provider can be
+left orphaned if the cluster is removed first.
 
-The symptoms are `DependencyViolation` on the subnets,
+Common symptoms are `DependencyViolation` on the subnets,
 `has some mapped public address(es)` on the internet gateway, and finally
 `DependencyViolation` on the VPC itself.
 
@@ -111,19 +121,24 @@ aws ec2 delete-network-interface --region ap-south-2 --network-interface-id <eni
 
 The controller creates one frontend security group per load balancer it
 manages (so two here, since this project runs two ALBs), plus one shared
-backend security group. The frontend SGs are attached to the load balancers
-themselves; the backend SG is attached to the worker nodes and is what the
-frontend SGs' rules reference to permit traffic through to the pods. The
-controller removes all of them itself when the Ingress is deleted and it
-tears the ALB down — but not when the load balancer is deleted directly with
-`delete-load-balancer`. They then block the VPC delete.
+backend security group. Each frontend SG is attached to its load balancer and
+controls client-facing traffic. The shared backend SG is also attached to the
+load balancers; the controller adds rules to the target node/ENI security
+groups that allow traffic sourced from that shared backend SG to reach the
+registered targets.
+
+The controller normally cleans these up when their Ingresses are deleted. A
+manual `delete-load-balancer` recovery can leave controller-owned security
+groups behind, which can then block VPC deletion.
 
 ```bash
 aws ec2 describe-security-groups --region ap-south-2 \
   --filters Name=vpc-id,Values=$VPC \
   --query 'SecurityGroups[?GroupName!=`default`].[GroupId,GroupName]' --output table
 
-aws ec2 delete-security-group --region ap-south-2 --group-id <sg-id>
+# The query above also returns EKS/Terraform-managed groups. Delete only a
+# security group you have confirmed belongs to the Load Balancer Controller.
+aws ec2 delete-security-group --region ap-south-2 --group-id <controller-sg-id>
 ```
 
 The default group deletes with the VPC and can be ignored. If a group refuses to
@@ -170,10 +185,34 @@ aws iam list-roles \
 Leaving the stack costs nothing, but the next `eksctl create iamserviceaccount`
 collides with a stack of the same name.
 
+### 4. The EKS IRSA OIDC provider
+
+`eksctl utils associate-iam-oidc-provider` creates an IAM OIDC provider for the
+EKS cluster issuer. It is separate from the Terraform-managed GitHub Actions
+OIDC provider. A normal `make destroy` removes the EKS provider before the
+cluster is deleted.
+
+If a failed teardown already removed the cluster, list IAM OIDC providers and
+inspect the EKS issuer entries before deleting anything:
+
+```bash
+aws iam list-open-id-connect-providers --output table
+
+aws iam get-open-id-connect-provider \
+  --open-id-connect-provider-arn <eks-oidc-provider-arn>
+
+# Delete only the provider whose URL is the old
+# oidc.eks.ap-south-2.amazonaws.com/id/... issuer. Do not delete the GitHub
+# provider at token.actions.githubusercontent.com.
+aws iam delete-open-id-connect-provider \
+  --open-id-connect-provider-arn <eks-oidc-provider-arn>
+```
+
 ## First time only
 
-Two things here survive `terraform destroy` and only need to happen once per
-AWS account, not per rebuild.
+Two account-level prerequisites survive `terraform destroy` and only need to
+be created once, not per rebuild. The cluster-specific EKS IRSA OIDC provider
+is different: it is recreated for each cluster and removed by `make destroy`.
 
 ### State backend bucket
 
@@ -211,9 +250,10 @@ aws iam create-policy \
 aws iam list-policies --scope Local | grep AWSLoadBalancer
 ```
 
-The `v2.9.2` in that URL has to match `LBC_VERSION` in the Makefile — that
-variable pins the controller's running version so it can't silently drift
-ahead of the permissions this policy grants it.
+The `v2.9.2` in that URL has to match `LBC_VERSION` in the Makefile. The
+controller is paired with Helm chart `1.9.2` through `LBC_CHART_VERSION`; that
+chart reports app version `v2.9.2`. Pinning the policy, chart, and controller
+keeps rebuilds on the verified combination instead of silently drifting.
 
 ## Rebuild
 
@@ -234,7 +274,7 @@ kubectl get nodes                      # make kubeconfig, make nodes
 
 ```bash
 # make platform
-kubectl create namespace manual-managed
+kubectl create namespace manual-managed --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f k8s/manual/deployment-v2-with-limits.yaml
 kubectl apply -f k8s/manual/service.yaml
 kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
@@ -245,11 +285,11 @@ kubectl apply -f k8s/manual/pdb.yaml
 
 # k8s/rbac/deploy-roles.yaml creates namespaced Roles/RoleBindings in
 # app-dev and app-prod, so those namespaces have to exist first. On a
-# fresh cluster they don't yet - `make app-dev`/`make app-prod` and the CI
-# pipeline only create them later, at first deploy - so platform creates
-# them here too. It's idempotent: if they already exist, this is a no-op.
-kubectl create namespace app-dev
-kubectl create namespace app-prod
+# fresh cluster they don't yet. The manual Helm targets can create them, but
+# the CI workflows expect them to already exist, so platform creates them here
+# before RBAC is applied. The commands are idempotent.
+kubectl create namespace app-dev --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace app-prod --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl apply -f k8s/rbac/deploy-roles.yaml
 ```
@@ -263,8 +303,8 @@ helm repo add grafana https://grafana.github.io/helm-charts
 helm repo add eks https://aws.github.io/eks-charts
 helm repo update
 
-kubectl create namespace monitoring
-helm install kps prometheus-community/kube-prometheus-stack \
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade --install kps prometheus-community/kube-prometheus-stack \
   -n monitoring -f observability/kube-prom-stack-values.yaml
 
 kubectl apply -f observability/podinfo-servicemonitor.yaml
@@ -272,12 +312,10 @@ kubectl apply -f observability/podinfo-alert-rules.yaml
 kubectl apply -f observability/app-alert-rules.yaml
 kubectl apply -f observability/grafana-dashboard-configmap.yaml
 
-helm install loki grafana/loki-stack -n monitoring -f observability/loki-values.yaml
+helm upgrade --install loki grafana/loki-stack -n monitoring -f observability/loki-values.yaml
 
-# Loki registers itself as a default data source. Two defaults crash Grafana,
-# so this has to be flipped to false and Grafana restarted.
-kubectl edit configmap loki-loki-stack -n monitoring   # isDefault: true -> false
-kubectl rollout restart deployment kps-grafana -n monitoring
+# observability/loki-values.yaml sets loki.isDefault=false, so the datasource
+# ConfigMap is correct at install time and Prometheus remains Grafana's default.
 ```
 
 The admin password is no longer set in the values file. The chart generates one
@@ -298,6 +336,29 @@ podinfo dashboard predates that approach and still has to be imported by hand:
 localhost:3000 -> Dashboards -> Import
   -> observability/grafana-dashboards/podinfo-dashboard.json
 ```
+
+#### Grafana admin credential rotation
+
+This lab does not store an application secret and does not run External Secrets
+Operator. The Grafana admin password is the platform credential that needs a
+rotation procedure. Because Grafana and Prometheus data are intentionally
+non-persistent here, the clean lab-safe rotation is to recreate the monitoring
+release and retrieve the new chart-generated password:
+
+```bash
+helm uninstall kps -n monitoring
+make monitoring
+
+kubectl get secret kps-grafana -n monitoring \
+  -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+
+`make monitoring` reinstalls the stack and reapplies the project monitoring
+resources in one pass. The ConfigMap-provisioned application SLO dashboard
+returns automatically; the manually imported `podinfo` dashboard must be
+imported again.
+This procedure intentionally trades monitoring-history retention for simplicity
+in the short-lived lab environment.
 
 ### Ingress controller
 
@@ -327,12 +388,11 @@ eksctl create iamserviceaccount \
 # create=false tells Helm to use the service account eksctl just made. A
 # chart-created one would have no role annotation and no AWS permissions.
 #
-# image.tag pins the controller to v2.9.2, the same version the IAM policy
-# above was fetched for. Leaving this unset installs whatever controller
-# version the chart currently defaults to, which can move ahead of the
-# policy's permissions with no error - just missing IAM actions at runtime.
-helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+# Pin the verified chart/controller pair. Chart 1.9.2 reports app version
+# v2.9.2, matching the IAM policy downloaded above.
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
   -n kube-system \
+  --version 1.9.2 \
   --set clusterName=eks-observable-platform \
   --set serviceAccount.create=false \
   --set serviceAccount.name=aws-load-balancer-controller \
@@ -370,6 +430,11 @@ helm upgrade --install app-prod ./application/helm \
 `--atomic` reverts a rollout that fails to complete. It does not catch a release
 that deploys cleanly and then serves errors — that is what the k6 gates are for.
 See incident 05.
+
+`make app-prod` is a manual deployment path; it does not reproduce the GitHub
+Actions promotion gates or automated rollback. To validate an equivalent manual
+deploy, follow it with `make smoke NS=app-prod` and `make load NS=app-prod`, then
+roll back manually if either gate fails.
 
 ### Rollback
 

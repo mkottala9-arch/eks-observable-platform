@@ -6,8 +6,10 @@
 # scoped and deliberately cannot create RBAC objects. a role that can grant
 # permissions can escalate itself.
 #
-# The subject is the GROUP set in the access entry's kubernetes_groups, not the
-# username. usernames contain the session name, which changes per assume-role.
+# Each environment has its own GROUP in the EKS access entry. Keeping dev and
+# prod in separate groups matters because Kubernetes RBAC is additive to EKS
+# access-policy permissions. The subject is the group rather than the username;
+# usernames contain the session name, which changes per assume-role.
 
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -26,7 +28,7 @@ metadata:
   namespace: app-dev
 subjects:
   - kind: Group
-    name: app-deployers
+    name: app-dev-deployers
     apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: Role
@@ -50,7 +52,7 @@ metadata:
   namespace: app-prod
 subjects:
   - kind: Group
-    name: app-deployers
+    name: app-prod-deployers
     apiGroup: rbac.authorization.k8s.io
 roleRef:
   kind: Role
