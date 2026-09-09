@@ -258,7 +258,7 @@ p95 latency < 1 s
 
 Smoke runs first so a fundamentally broken release fails quickly instead of waiting through the full load profile.
 
-If either production validation gate fails, GitHub Actions runs `helm rollback` using the revision recorded before deployment.
+If either production validation gate fails, GitHub Actions runs `helm rollback` (no revision argument, so Helm reverts to whichever release is immediately previous in its history). The revision recorded before deployment is used to report what was restored in the workflow summary, not passed into the rollback command itself.
 
 The rollback restores the previous healthy release, while the GitHub Actions workflow remains failed so the unsuccessful promotion stays visible in CI/CD history.
 
@@ -369,14 +369,16 @@ The Makefile wraps the commands used most often:
 
 | Command | Purpose |
 |---|---|
+| `make init` | Initialize the Terraform working directory (required once per clone) |
 | `make apply` | Create the cluster and supporting AWS resources |
-| `make platform` | Deploy `podinfo`, guardrails, Metrics Server, and RBAC |
+| `make platform` | Deploy `podinfo`, guardrails, Metrics Server, namespaces, and RBAC |
 | `make monitoring` | Install monitoring and apply dashboards and alert rules |
 | `make app-dev TAG=vX.Y.Z` / `make app-prod TAG=vX.Y.Z` | Manual application deployment |
 | `make test` | Run application unit tests |
 | `make lint` | Run Terraform and Helm validation used by CI |
 | `make smoke` / `make load` | Run application release gates |
 | `make chaos-oom` / `make chaos-drain` | Re-run the main reliability scenarios |
+| `make chaos-drain-revert` | Uncordon the node `chaos-drain` drained, before scaling it back down |
 | `make destroy` | Ordered teardown of ALBs, controller resources, and Terraform infrastructure |
 
 The teardown order matters because the AWS Load Balancer Controller creates ALBs outside Terraform's direct resource graph. The Makefile removes ingress owners and waits for the load balancers to disappear before destroying the EKS/VPC infrastructure.
@@ -441,6 +443,8 @@ The teardown order matters because the AWS Load Balancer Controller creates ALBs
 │   ├── loki-values.yaml
 │   ├── podinfo-alert-rules.yaml
 │   └── podinfo-servicemonitor.yaml
+├── scripts/
+│   └── wait-for-job.sh
 ├── terraform/
 │   ├── .terraform.lock.hcl
 │   ├── backend.tf

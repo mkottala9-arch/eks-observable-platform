@@ -24,13 +24,17 @@ knows how to delete those load balancers. `terraform destroy` then fails on the
 subnets and the internet gateway, because the ALB still holds ENIs and public
 addresses in the VPC.
 
-Both projects create an ALB, so both have to be removed:
+Two ALBs exist — `podinfo`'s and `app-prod`'s — and both have to be removed
+before the VPC can go. `app-dev` stays internal to the cluster and never gets
+an ALB, but it's uninstalled here too as ordinary application cleanup, not
+because it's blocking anything:
 
 ```bash
-# Project 1: the podinfo ingress.
+# Project 1: the podinfo ingress, which owns an ALB.
 kubectl delete -f k8s/manual/ingress.yaml
 
-# Project 2: the app ingresses, which belong to the Helm releases.
+# Project 2: app-prod's ALB comes from its Helm release's ingress.
+# app-dev has no ALB (internal service only) but is removed for cleanliness.
 helm uninstall app-prod -n app-prod
 helm uninstall app-dev -n app-dev
 
@@ -50,11 +54,15 @@ eksctl delete iamserviceaccount \
 terraform -chdir=terraform destroy
 ```
 
-`make destroy` does all of the above and refuses to run Terraform while any load
-balancer remains, rather than failing halfway through.
+`make destroy` does all of the above, refuses to run Terraform while any load
+balancer remains, and stops before `terraform destroy` if
+`eksctl delete iamserviceaccount` fails for any reason other than the service
+account already being gone — rather than silently ignoring the failure and
+hitting the exact ordering problem this section exists to describe.
 
-`make verify` reports load balancers and controller-created security groups
-still present in the VPC, and is worth running before and after a teardown.
+`make verify` reports load balancers and non-default security groups still
+present in the VPC (this includes EKS-managed groups, not only the
+controller's), and is worth running before and after a teardown.
 
 ## Orphaned resources after a failed teardown
 
@@ -77,6 +85,11 @@ aws elbv2 describe-load-balancers --region ap-south-2 \
 
 aws elbv2 delete-load-balancer --region ap-south-2 --load-balancer-arn <arn>
 
+# Deletion is asynchronous - without this, describe-target-groups below can
+# still see the load balancer's ENIs attached and the target-group delete
+# can fail as still-in-use.
+aws elbv2 wait load-balancers-deleted --region ap-south-2 --load-balancer-arns <arn>
+
 aws elbv2 describe-target-groups --region ap-south-2 \
   --query "TargetGroups[?VpcId=='$VPC'].TargetGroupArn" --output text
 
@@ -96,10 +109,14 @@ aws ec2 delete-network-interface --region ap-south-2 --network-interface-id <eni
 
 ### 2. The controller's security groups
 
-The controller creates two: one for the load balancer, and one shared backend
-group attached to pod ENIs. It removes both itself when the Ingress is deleted
-and it tears the ALB down — but not when the load balancer is deleted directly
-with `delete-load-balancer`. They then block the VPC delete.
+The controller creates one frontend security group per load balancer it
+manages (so two here, since this project runs two ALBs), plus one shared
+backend security group. The frontend SGs are attached to the load balancers
+themselves; the backend SG is attached to the worker nodes and is what the
+frontend SGs' rules reference to permit traffic through to the pods. The
+controller removes all of them itself when the Ingress is deleted and it
+tears the ALB down — but not when the load balancer is deleted directly with
+`delete-load-balancer`. They then block the VPC delete.
 
 ```bash
 aws ec2 describe-security-groups --region ap-south-2 \
@@ -155,7 +172,33 @@ collides with a stack of the same name.
 
 ## First time only
 
-The IAM policy survives `terraform destroy`, so skip this on rebuilds.
+Two things here survive `terraform destroy` and only need to happen once per
+AWS account, not per rebuild.
+
+### State backend bucket
+
+`terraform/backend.tf` points at a specific S3 bucket
+(`eks-observable-platform-tfstate-krishna756808`) that Terraform assumes
+already exists — the backend block can't create its own backend, and it
+can't use variables, so the bucket has to exist before the first `terraform
+init` ever runs:
+
+```bash
+aws s3api create-bucket \
+  --bucket eks-observable-platform-tfstate-krishna756808 \
+  --region ap-south-2 \
+  --create-bucket-configuration LocationConstraint=ap-south-2
+
+aws s3api put-bucket-versioning \
+  --bucket eks-observable-platform-tfstate-krishna756808 \
+  --versioning-configuration Status=Enabled
+```
+
+Versioning isn't required for `use_lockfile` locking to work, but it means a
+corrupted or force-pushed state file can still be recovered from a previous
+version.
+
+### IAM policy for the Load Balancer Controller
 
 ```bash
 curl -o iam-policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.9.2/docs/install/iam_policy.json
@@ -168,15 +211,23 @@ aws iam create-policy \
 aws iam list-policies --scope Local | grep AWSLoadBalancer
 ```
 
+The `v2.9.2` in that URL has to match `LBC_VERSION` in the Makefile — that
+variable pins the controller's running version so it can't silently drift
+ahead of the permissions this policy grants it.
+
 ## Rebuild
 
 ### Infrastructure
 
+A brand-new clone has no `.terraform/` directory yet, so `terraform apply`
+on its own will fail. Initialize first:
+
 ```bash
-terraform -chdir=terraform apply          # make apply
+terraform -chdir=terraform init        # make init
+terraform -chdir=terraform apply       # make apply
 
 aws eks update-kubeconfig --region ap-south-2 --name eks-observable-platform
-kubectl get nodes                         # make kubeconfig, make nodes
+kubectl get nodes                      # make kubeconfig, make nodes
 ```
 
 ### Project 1 — podinfo and guardrails
@@ -192,7 +243,14 @@ kubectl apply -f k8s/manual/limitrange.yaml
 kubectl apply -f k8s/manual/resourcequota.yaml
 kubectl apply -f k8s/manual/pdb.yaml
 
-# RBAC for the deploy roles used by the pipeline.
+# k8s/rbac/deploy-roles.yaml creates namespaced Roles/RoleBindings in
+# app-dev and app-prod, so those namespaces have to exist first. On a
+# fresh cluster they don't yet - `make app-dev`/`make app-prod` and the CI
+# pipeline only create them later, at first deploy - so platform creates
+# them here too. It's idempotent: if they already exist, this is a no-op.
+kubectl create namespace app-dev
+kubectl create namespace app-prod
+
 kubectl apply -f k8s/rbac/deploy-roles.yaml
 ```
 
@@ -246,6 +304,11 @@ localhost:3000 -> Dashboards -> Import
 ```bash
 # make ingress-controller
 
+# Added here too, not only in the monitoring target, so this works even if
+# it's run before make monitoring on a fresh cluster.
+helm repo add eks https://aws.github.io/eks-charts
+helm repo update
+
 # A new cluster gets a new OIDC issuer, so this runs every time.
 eksctl utils associate-iam-oidc-provider \
   --region ap-south-2 --cluster eks-observable-platform --approve
@@ -263,29 +326,24 @@ eksctl create iamserviceaccount \
 
 # create=false tells Helm to use the service account eksctl just made. A
 # chart-created one would have no role annotation and no AWS permissions.
+#
+# image.tag pins the controller to v2.9.2, the same version the IAM policy
+# above was fetched for. Leaving this unset installs whatever controller
+# version the chart currently defaults to, which can move ahead of the
+# policy's permissions with no error - just missing IAM actions at runtime.
 helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
   -n kube-system \
   --set clusterName=eks-observable-platform \
   --set serviceAccount.create=false \
   --set serviceAccount.name=aws-load-balancer-controller \
   --set region=ap-south-2 \
+  --set image.tag=v2.9.2 \
   --set vpcId=$(aws eks describe-cluster --name eks-observable-platform \
     --region ap-south-2 --query "cluster.resourcesVpcConfig.vpcId" --output text)
 
 # The ALB address usually takes 2-3 minutes to appear.
 kubectl apply -f k8s/manual/ingress.yaml       # make ingress
 kubectl get ingress -n manual-managed -w
-```
-
-### Project 2 — application namespaces
-
-`make app-dev` and `make app-prod` create these with `--create-namespace`, but
-the pipeline does not, so on a fresh cluster they must exist before the first
-automated deploy:
-
-```bash
-kubectl create namespace app-dev
-kubectl create namespace app-prod
 ```
 
 ## Deploying the application
@@ -372,23 +430,46 @@ sed -i 's/desired_size = 1/desired_size = 2/' terraform/eks.tf
 terraform -chdir=terraform apply
 
 make chaos-drain    # incident 04
+```
 
-# Revert afterwards. The second node exists only for this test.
+`chaos-drain` cordons the node and evicts its pods — it does not remove the
+node from the cluster. `kubectl get nodes` still shows it as
+`Ready,SchedulingDisabled` afterward. Uncordon it before scaling back down:
+
+```bash
+make chaos-drain-revert
+```
+
+Only then revert the node count. The second node exists only for this test:
+
+```bash
 sed -i 's/desired_size = 2/desired_size = 1/' terraform/eks.tf
 terraform -chdir=terraform apply
 ```
 
-Without the second node the PodDisruptionBudget blocks the drain indefinitely,
-because `minAvailable: 1` cannot be satisfied while the replacement pod has
-nowhere to schedule.
+Skipping the uncordon step is the trap here: scaling `desired_size` back to 1
+tells the ASG to remove one node, but nothing guarantees it removes the
+*cordoned* one specifically. If it removes the other (healthy) node instead,
+the cluster is left with a single worker that's `SchedulingDisabled` — nothing
+can be scheduled anywhere until someone notices and uncordons it by hand.
+
+Without the second node in the first place, the PodDisruptionBudget blocks the
+drain indefinitely, because `minAvailable: 1` cannot be satisfied while the
+replacement pod has nowhere to schedule.
 
 ## Notes
 
 - The node group has desired size 1 and maximum 2. The second node exists for
   the drain test and is scaled up and back down around it.
 - Worker nodes run in public subnets to avoid NAT Gateway cost.
-- Loki persistence is disabled; logs do not survive a restart.
-- Grafana has no persistent volume, so the admin password is regenerated and
-  the podinfo dashboard re-imported on every rebuild.
+- Loki persistence is disabled, so logs do not survive Loki being recreated
+  (e.g. `helm uninstall`/reinstall, or the underlying node being replaced) —
+  an ordinary pod restart on the same PV would be fine if one existed, but
+  none does here.
+- Grafana has no persistent volume, so the podinfo dashboard has to be
+  re-imported on every rebuild. Separately, the admin password is generated
+  fresh into a Kubernetes Secret on every `helm install` — that's a property
+  of how the chart handles credentials, not a consequence of the missing
+  volume, so it's regenerated even in a hypothetical persistent-storage setup.
 - `promote.yml` uses `jq`, so it is required on any machine running the
   equivalent steps by hand.

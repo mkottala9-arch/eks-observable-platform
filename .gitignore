@@ -45,3 +45,4 @@ terraform.rc
 iam-policy.json
 __pycache__/
 .pytest_cache/
+.last-drained-node

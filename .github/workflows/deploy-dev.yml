@@ -76,8 +76,14 @@ jobs:
             | kubectl apply -n $NS -f -
 
           # capture the result instead of letting a failure kill the step,
-          # so the logs still get printed below
-          kubectl wait --for=condition=complete job/k6-smoke -n $NS --timeout=120s \
+          # so the logs still get printed below.
+          #
+          # scripts/wait-for-job.sh polls for Complete OR Failed directly.
+          # `kubectl wait --for=condition=complete` only resolves when
+          # Complete becomes true, so a Failed job would otherwise sit here
+          # for the full --timeout before being reported at all.
+          chmod +x scripts/wait-for-job.sh
+          ./scripts/wait-for-job.sh k6-smoke $NS 120 \
             && RESULT=pass || RESULT=fail
 
           echo "--- k6 output ---"

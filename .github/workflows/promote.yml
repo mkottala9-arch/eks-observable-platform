@@ -98,7 +98,11 @@ jobs:
 
           sed "s|PLACEHOLDER|$TARGET|" k6/app/smoke-job.yaml | kubectl apply -n $NS -f -
 
-          kubectl wait --for=condition=complete job/k6-smoke -n $NS --timeout=120s \
+          # `kubectl wait --for=condition=complete` never returns early on a
+          # Failed job - it just waits out the full timeout. This polls both
+          # conditions directly. See scripts/wait-for-job.sh.
+          chmod +x scripts/wait-for-job.sh
+          ./scripts/wait-for-job.sh k6-smoke $NS 120 \
             && RESULT=pass || RESULT=fail
 
           echo "--- k6 smoke output ---"
@@ -125,7 +129,8 @@ jobs:
 
           sed "s|PLACEHOLDER|$TARGET|" k6/app/load-job.yaml | kubectl apply -n $NS -f -
 
-          kubectl wait --for=condition=complete job/k6-load -n $NS --timeout=360s \
+          chmod +x scripts/wait-for-job.sh
+          ./scripts/wait-for-job.sh k6-load $NS 360 \
             && RESULT=pass || RESULT=fail
 
           echo "--- k6 load output ---"
@@ -146,12 +151,24 @@ jobs:
         run: |
           echo "::warning::validation failed - rolling back app-prod"
 
+          # No revision argument: this reverts to whatever Helm considers
+          # "previous" (the release history entry immediately before the
+          # current one), not specifically to steps.before.outputs.revision.
+          # That's fine here because nothing else touches app-prod between
+          # the deploy step and this one, so "previous" and "before" are the
+          # same release - but the two are not the same mechanism, and the
+          # recorded revision below is for reporting only.
           helm rollback app-prod -n app-prod --wait --timeout 5m
 
           NOW=$(helm list -n app-prod -o json \
             | jq -r '.[] | select(.name=="app-prod") | .revision')
 
-          echo "rolled back from revision ${{ steps.before.outputs.revision }} to $NOW" \
+          # Worded as "created / restoring", not "from X to Y" - the naive
+          # phrasing reads as if X (the healthy revision) is what's stale
+          # and Y is the improvement, when it's the opposite: rollback
+          # created a brand-new revision (NOW) whose config matches the
+          # earlier healthy one (steps.before.outputs.revision).
+          echo "rollback created revision $NOW, restoring the state of revision ${{ steps.before.outputs.revision }}" \
             >> $GITHUB_STEP_SUMMARY
 
           kubectl get pods -n app-prod
