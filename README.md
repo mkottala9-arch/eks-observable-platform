@@ -8,16 +8,16 @@ The result is a single project that covers both sides of operating workloads on 
 
 ## Project Goals
 
-- Provision a repeatable Amazon EKS environment with Terraform
-- Understand Kubernetes behaviour during memory pressure, application failure, and node disruption
-- Protect workloads with resource requests, limits, namespace guardrails, and disruption budgets
-- Collect node, container, Kubernetes, application, and log data
-- Build and deploy an owned application through Docker, ECR, Helm, and GitHub Actions
-- Use OIDC and namespace-scoped access instead of long-lived AWS deployment credentials
-- Validate releases with post-deploy smoke and load tests
-- Monitor application success ratio, HTTP errors, latency, build version, and runtime fault state
-- Automatically roll back a production promotion when validation fails
-- Document each failure with terminal evidence, dashboards, alerts, workflow output, findings, and recovery
+- Provision the AWS foundation with **Terraform**, including the VPC, Amazon EKS, managed node group, ECR, IAM roles, GitHub OIDC provider, and EKS access entries
+- Deploy Kubernetes workloads with **Helm**, using separate development and production configuration, health probes, resource limits, PDBs, ServiceMonitors, and ALB ingress
+- Build a complete **GitHub Actions CI/CD pipeline** covering pull-request validation, versioned releases, automatic dev deployment, manual production promotion, and post-deploy validation
+- Use **GitHub Actions OIDC** and separate CI/dev/prod IAM roles so deployments use short-lived AWS credentials instead of stored access keys
+- Store immutable application images in **Amazon ECR** and promote the same tested image from development to production
+- Validate releases with **k6 smoke and load tests** after deployment instead of relying only on Kubernetes rollout health
+- Automatically run **Helm rollback** when production smoke or load validation fails, restoring the previous healthy revision while keeping the failed promotion visible
+- Build a full **observability stack with Prometheus, Grafana, Alertmanager, Loki, and Promtail** for infrastructure, Kubernetes, container, application, and log visibility
+- Expose custom application metrics for **success ratio, HTTP errors, latency, deployed version, and fault mode**, and use them in dashboards and Prometheus alerts
+- Test the platform through controlled incidents covering **memory pressure, OOM and eviction, resource guardrails, HTTP 500 failures, node drain, release failure, and automated recovery**
 
 ## What Was Built
 
@@ -165,22 +165,60 @@ The container is also hardened through:
 
 Development runs one replica. Production runs two.
 
-## CI/CD and Access Control
+## CI/CD with GitHub Actions
 
-The delivery path is split into four GitHub Actions workflows.
+Application delivery is automated through GitHub Actions, while Terraform infrastructure changes remain manual.
 
-| Workflow | Purpose |
+The pipeline is split into four workflows so pull-request validation, release creation, development deployment, and production promotion each have a clear responsibility.
+
+| Workflow | What It Does |
 |---|---|
-| `pull-request.yml` | Unit tests, Docker build, Terraform format/validation, Helm lint, and Gitleaks |
-| `release.yml` | Builds version-tagged images and pushes them to ECR |
-| `deploy-dev.yml` | Automatically deploys a successful release to `app-dev` and runs a smoke test |
-| `promote.yml` | Manually promotes a tested tag to production, runs validation, and rolls back on failure |
+| `pull-request.yml` | Runs unit tests, verifies the Docker build, validates Terraform and Helm, and scans the repository with Gitleaks |
+| `release.yml` | Accepts version tags only from commits on `main`, builds the application image, and pushes the versioned image to Amazon ECR |
+| `deploy-dev.yml` | Runs after a successful release, deploys the same image to `app-dev` with Helm, and runs a k6 smoke test |
+| `promote.yml` | Manually promotes an existing ECR image to `app-prod`, validates the release, and rolls back automatically if validation fails |
 
-GitHub Actions receives short-lived AWS credentials through OIDC rather than long-lived access keys.
+### Pull Request Validation
 
-Terraform creates separate roles for CI, development deployment, and production deployment. EKS Access Entries scope the deployment roles to their namespaces, while Kubernetes RBAC grants the additional `ServiceMonitor` permissions required by the monitoring CRD.
+Every pull request must pass four GitHub Actions jobs before the change is merged:
+
+- **Test** — runs the Python unit tests with `pytest`
+- **Build** — confirms that the application Docker image builds successfully
+- **Lint** — runs `terraform fmt`, `terraform validate`, and `helm lint`
+- **Secrets** — scans the repository with Gitleaks
+
+After the change reaches `main`, a version tag is used to create a release.
+
+The release workflow first verifies that the tagged commit belongs to `main`. It then builds the Docker image, tags it with the Git version tag, and pushes it to an ECR repository configured with immutable tags and scan-on-push.
+
+### Development Deployment
+
+A successful release automatically triggers deployment to `app-dev`.
+
+Helm deploys the versioned image and k6 runs a smoke test against the development application. This provides an application-level check before the same image is considered for production.
+
+The image is not rebuilt for production. The exact image already published and tested in development is promoted forward.
+
+### Production Promotion
+
+Production deployment is intentionally separate from development.
+
+Promotion requires manual approval through the GitHub `production` environment. After approval, the workflow:
+
+1. assumes the production deployment role through GitHub OIDC
+2. verifies that the requested image exists in ECR
+3. records the currently deployed Helm revision
+4. deploys the selected version to `app-prod` with Helm
+5. runs the production k6 smoke test
+6. runs the sustained k6 load test if smoke validation passes
+
+GitHub Actions uses short-lived AWS credentials through OIDC, so long-lived AWS access keys are not stored in repository secrets.
+
+Terraform creates separate roles for CI, development deployment, and production deployment. EKS Access Entries scope the deployment roles to the required namespaces, while Kubernetes RBAC grants the additional `ServiceMonitor` permissions needed by the monitoring CRD.
 
 ## Release Validation and Automated Rollback
+
+A successful Kubernetes rollout is not treated as proof that the application is working correctly.
 
 Helm deploys production with:
 
@@ -188,9 +226,9 @@ Helm deploys production with:
 --atomic --wait --timeout 5m
 ```
 
-This protects against rollout failures such as pods that cannot become Ready.
+This protects the release when Kubernetes cannot complete the rollout, for example when new pods cannot become Ready.
 
-Once the rollout succeeds, k6 validates application behaviour.
+After the rollout succeeds, the application is validated separately with k6.
 
 ### Smoke Gate
 
@@ -203,7 +241,7 @@ p95 latency < 500 ms
 
 ### Load Gate
 
-The load test runs for three minutes:
+Only a successful smoke test proceeds to the three-minute load test:
 
 ```text
 30s ramp-up to 10 VUs
@@ -211,32 +249,40 @@ The load test runs for three minutes:
 30s ramp-down
 ```
 
-Its thresholds are:
+The load gate requires:
 
 ```text
 HTTP failures < 1%
 p95 latency < 1 s
 ```
 
-Smoke runs first so a fundamentally broken release fails quickly instead of waiting through the three-minute load profile.
+Smoke runs first so a fundamentally broken release fails quickly instead of waiting through the full load profile.
 
-If either production validation gate fails, the workflow runs `helm rollback`.
+If either production validation gate fails, GitHub Actions runs `helm rollback` using the revision recorded before deployment.
 
-Incident 05 deliberately enabled a bad production configuration. Kubernetes and Helm completed the rollout, but the application success ratio collapsed, the smoke gate failed, application alerts fired, and GitHub Actions restored the previous healthy Helm revision.
+The rollback restores the previous healthy release, while the GitHub Actions workflow remains failed so the unsuccessful promotion stays visible in CI/CD history.
 
 ![GitHub Actions showing failed validation and automated rollback](incidents/incident-05/github-actions-rollback.png)
 
+Incident 05 validated this path by promoting a production configuration that caused HTTP 500 responses. Kubernetes and Helm completed the rollout successfully, but the smoke test detected the application failure and triggered rollback to the previous healthy release.
+
+Helm history preserved both the failed upgrade and the rollback revision, while the application returned to its previous healthy version.
+
 ## Observability
 
-Prometheus collects platform and application signals from several sources:
+The platform combines Kubernetes, infrastructure, container, application, and log signals instead of relying on pod status alone.
 
-| Source | Purpose |
+Prometheus collects metrics from several sources:
+
+| Source | What It Provides |
 |---|---|
-| `kube-state-metrics` | Kubernetes object state, replica status, and restart counters |
-| `node-exporter` | Node CPU, memory, filesystem, and network metrics |
-| kubelet / cAdvisor | Pod and container resource metrics |
-| `podinfo` metrics | Request rate, response status, and application latency for the reliability tests |
-| owned application metrics | Request count, latency, build information, and fault-mode state |
+| `kube-state-metrics` | Kubernetes object state, replica status, and container restart counters |
+| `node-exporter` | Worker-node CPU, memory, filesystem, and network metrics |
+| kubelet / cAdvisor | Pod and container resource usage |
+| `podinfo` metrics | Request rate, response status, and latency used during the Phase 1 experiments |
+| owned application metrics | Request count, latency, build information, and runtime fault state |
+
+The pre-built dashboards from `kube-prometheus-stack` provide node and container visibility, while the custom dashboards focus on workload and application behaviour.
 
 The owned application exports:
 
@@ -245,40 +291,53 @@ The owned application exports:
 - `app_build_info`
 - `app_fault_mode`
 
-`app_build_info` exposes the real application version, Git commit, and environment, which made the failed `v1.8.0` promotion directly visible in Grafana.
+`app_build_info` makes the running application version, Git commit, and environment visible in Grafana. This allowed the Incident 05 failure to be correlated directly with the `v1.8.0` release.
 
-### Application Alerts
+### Application SLO Dashboard
 
-| Alert | Detects | Condition |
-|---|---|---|
-| `AppHighErrorRate` | User-facing HTTP failures | Error ratio above 1% for 2 minutes |
-| `AppHighLatency` | Sustained application slowdown | p95 latency above 1 second for 5 minutes |
-| `AppFaultModeEnabled` | Bad runtime configuration | Fault mode enabled for 1 minute |
-| `AppPodRestarting` | Container instability | Restart detected over a 10-minute window and present for 1 minute |
+The custom Grafana dashboard tracks:
 
-The SLO dashboard shows success ratio, HTTP 5xx rate, request traffic, p95 latency, deployed version, and fault mode.
+- success ratio
+- HTTP 5xx error rate
+- request rate
+- p95 latency
+- deployed version
+- fault-mode state
 
-Loki and Promtail collect container logs. During the HTTP fault-injection test, application metrics exposed the request failure, while Loki confirmed that the logging pipeline was working and captured the logs emitted by the application.
+This provides both user-facing health and release context on the same dashboard.
+
+![Grafana SLO dashboard during the failed release](incidents/incident-05/dashboard-during.png)
+
+### Alerting
+
+Prometheus evaluates application-specific alert rules:
+
+| Alert | Detects |
+|---|---|
+| `AppHighErrorRate` | More than 1% of requests failing for 2 minutes |
+| `AppHighLatency` | p95 application latency above 1 second for 5 minutes |
+| `AppFaultModeEnabled` | Fault mode remaining enabled for 1 minute |
+| `AppPodRestarting` | Recent container restart activity |
+
+During Incident 05, the application error-rate alert moved to `Firing` as the success ratio collapsed:
+
+![Prometheus showing AppHighErrorRate firing](incidents/incident-05/prometheus-alert-error-rate.png)
+
+Prometheus alert history also showed `AppFaultModeEnabled` moving through `Pending` and into `Firing` while the bad production configuration was active:
+
+![Prometheus showing AppFaultModeEnabled firing](incidents/incident-05/prometheus-alert-fault-mode.png)
+
+These signals serve a different purpose from the deployment gates. Prometheus and Alertmanager continuously detect runtime problems, while GitHub Actions owns automated rollback only during an active production promotion.
+
+### Logging
+
+Loki and Promtail collect container logs across the cluster.
+
+During the HTTP fault-injection experiment, application metrics provided the main failure signal while Loki confirmed that the logging pipeline was working and captured the logs emitted by the application.
+
+When an application emits detailed request or error logs, the same Loki pipeline can provide additional context for investigating the cause behind a metric or alert.
 
 Grafana's admin password is not hardcoded in Helm values. The chart generates it in a Kubernetes Secret, and the Makefile/runbook retrieve it when access is needed.
-
-### Monitoring and Recovery Evidence
-
-**Container restart monitoring and alerting**
-
-![Grafana dashboard showing container restart monitoring](incidents/incident-02/grafana-dashboard.png)
-
-**Application-level failure while pods remained healthy**
-
-![Grafana dashboard showing HTTP 500 errors while pods remained healthy](incidents/incident-03/grafana-monitoring.png)
-
-**SLO collapse during the broken release**
-
-![Grafana SLO dashboard during the broken release](incidents/incident-05/dashboard-during.png)
-
-**Application error alert during the release failure**
-
-![Prometheus showing the application error-rate alert](incidents/incident-05/prometheus-alert-error-rate.png)
 
 ## Failure Experiments and Results
 

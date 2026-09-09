@@ -41,7 +41,8 @@ VPC=$(aws eks describe-cluster --name eks-observable-platform \
 aws elbv2 describe-load-balancers --region ap-south-2 \
   --query "LoadBalancers[?VpcId=='$VPC'].LoadBalancerName" --output text
 
-# Terraform doesn't manage this because eksctl created it.
+# Terraform doesn't manage this because eksctl created it. It needs a live
+# cluster, so it has to run before terraform destroy.
 eksctl delete iamserviceaccount \
   --cluster=eks-observable-platform --region=ap-south-2 \
   --namespace=kube-system --name=aws-load-balancer-controller
@@ -52,22 +53,105 @@ terraform -chdir=terraform destroy
 `make destroy` does all of the above and refuses to run Terraform while any load
 balancer remains, rather than failing halfway through.
 
-### If terraform destroy already failed
+`make verify` reports load balancers and controller-created security groups
+still present in the VPC, and is worth running before and after a teardown.
 
-The symptoms are `DependencyViolation` on the subnets and
-`has some mapped public address(es)` on the internet gateway. An ALB is still
-there. Delete it by hand, then re-run the destroy:
+## Orphaned resources after a failed teardown
+
+Three classes of resource are created outside Terraform's graph by components
+that need a live cluster to clean up after themselves. Destroy the cluster
+first and all three strand, each blocking the next stage of the teardown.
+
+The symptoms are `DependencyViolation` on the subnets,
+`has some mapped public address(es)` on the internet gateway, and finally
+`DependencyViolation` on the VPC itself.
+
+### 1. The load balancer
+
+Created by the controller in response to an Ingress. Delete it and its target
+group directly:
 
 ```bash
-aws elbv2 delete-load-balancer --region ap-south-2 --load-balancer-arn <arn>
-aws elbv2 delete-target-group  --region ap-south-2 --target-group-arn <arn>
+aws elbv2 describe-load-balancers --region ap-south-2 \
+  --query "LoadBalancers[?VpcId=='$VPC'].[LoadBalancerName,LoadBalancerArn]" --output table
 
-# ENIs usually release within a couple of minutes. Any left as "available"
-# can be deleted directly.
+aws elbv2 delete-load-balancer --region ap-south-2 --load-balancer-arn <arn>
+
+aws elbv2 describe-target-groups --region ap-south-2 \
+  --query "TargetGroups[?VpcId=='$VPC'].TargetGroupArn" --output text
+
+aws elbv2 delete-target-group --region ap-south-2 --target-group-arn <arn>
+```
+
+ENIs usually release within a couple of minutes. Any left as `available` can be
+deleted directly:
+
+```bash
 aws ec2 describe-network-interfaces --region ap-south-2 \
   --filters Name=vpc-id,Values=$VPC \
   --query 'NetworkInterfaces[].[NetworkInterfaceId,Status,Description]' --output table
+
+aws ec2 delete-network-interface --region ap-south-2 --network-interface-id <eni-id>
 ```
+
+### 2. The controller's security groups
+
+The controller creates two: one for the load balancer, and one shared backend
+group attached to pod ENIs. It removes both itself when the Ingress is deleted
+and it tears the ALB down — but not when the load balancer is deleted directly
+with `delete-load-balancer`. They then block the VPC delete.
+
+```bash
+aws ec2 describe-security-groups --region ap-south-2 \
+  --filters Name=vpc-id,Values=$VPC \
+  --query 'SecurityGroups[?GroupName!=`default`].[GroupId,GroupName]' --output table
+
+aws ec2 delete-security-group --region ap-south-2 --group-id <sg-id>
+```
+
+The default group deletes with the VPC and can be ignored. If a group refuses to
+delete because another references it, drop the referencing rule first:
+
+```bash
+aws ec2 describe-security-groups --region ap-south-2 --group-ids <sg-id> \
+  --query 'SecurityGroups[0].IpPermissions' --output json
+
+aws ec2 revoke-security-group-ingress --region ap-south-2 \
+  --group-id <sg-id> --source-group <other-sg-id> --protocol -1
+```
+
+### 3. The eksctl CloudFormation stack
+
+`eksctl delete iamserviceaccount` talks to the cluster, so once the cluster is
+gone that command cannot run and CloudFormation is the only route. The stack
+also has termination protection enabled by default:
+
+```bash
+STACK=eksctl-eks-observable-platform-addon-iamserviceaccount-kube-system-aws-load-balancer-controller
+
+aws cloudformation list-stacks --region ap-south-2 \
+  --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+  --query "StackSummaries[?contains(StackName,'eksctl')].[StackName,StackStatus]" --output table
+
+aws cloudformation update-termination-protection --region ap-south-2 \
+  --no-enable-termination-protection --stack-name $STACK
+
+aws cloudformation delete-stack --region ap-south-2 --stack-name $STACK
+```
+
+Deletion is asynchronous, so allow a minute before checking:
+
+```bash
+aws cloudformation describe-stacks --region ap-south-2 \
+  --stack-name $STACK --query 'Stacks[0].StackStatus' --output text 2>&1 | tail -1
+
+# And confirm the IAM role went with it
+aws iam list-roles \
+  --query "Roles[?contains(RoleName,'eksctl-eks-observable-platform')].RoleName" --output text
+```
+
+Leaving the stack costs nothing, but the next `eksctl create iamserviceaccount`
+collides with a stack of the same name.
 
 ## First time only
 
@@ -169,6 +253,9 @@ eksctl utils associate-iam-oidc-provider \
 # The policy already exists, so this only attaches it. The command creates an
 # IAM role and a Kubernetes service account annotated with that role's ARN,
 # which is what makes IRSA work.
+#
+# If this fails with a stack that already exists, an earlier teardown left the
+# eksctl CloudFormation stack behind. See "Orphaned resources" above.
 eksctl create iamserviceaccount \
   --cluster=eks-observable-platform --region=ap-south-2 \
   --namespace=kube-system --name=aws-load-balancer-controller \
@@ -303,3 +390,5 @@ nowhere to schedule.
 - Loki persistence is disabled; logs do not survive a restart.
 - Grafana has no persistent volume, so the admin password is regenerated and
   the podinfo dashboard re-imported on every rebuild.
+- `promote.yml` uses `jq`, so it is required on any machine running the
+  equivalent steps by hand.

@@ -181,14 +181,20 @@ status:  ## Show pods across all project namespaces
 	  kubectl get pods -n $$ns 2>/dev/null || echo "  (absent)"; \
 	done
 
-verify:  ## Check whether any load balancers remain in the cluster VPC
+verify:  ## Check for load balancers and controller security groups in the VPC
 	@VPC=$$(aws eks describe-cluster --name $(CLUSTER) --region $(REGION) \
 	  --query "cluster.resourcesVpcConfig.vpcId" --output text 2>/dev/null); \
 	if [ -z "$$VPC" ] || [ "$$VPC" = "None" ]; then \
 	  echo "cluster not found; nothing to check"; \
 	else \
+	  echo "--- load balancers"; \
 	  aws elbv2 describe-load-balancers --region $(REGION) \
 	    --query "LoadBalancers[?VpcId=='$$VPC'].LoadBalancerName" --output text; \
+	  echo "--- controller security groups"; \
+	  aws ec2 describe-security-groups --region $(REGION) \
+	    --filters Name=vpc-id,Values=$$VPC \
+	    --query 'SecurityGroups[?GroupName!=`default`].[GroupId,GroupName]' \
+	    --output text; \
 	fi
 
 # ---------- teardown ----------
