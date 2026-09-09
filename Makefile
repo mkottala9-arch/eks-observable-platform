@@ -95,10 +95,28 @@ ingress-controller:  ## Install the AWS Load Balancer Controller
 	  --set image.tag=$(LBC_VERSION) \
 	  --set vpcId=$$(aws eks describe-cluster --name $(CLUSTER) \
 	    --region $(REGION) --query "cluster.resourcesVpcConfig.vpcId" --output text)
+	# Helm can return before the admission webhook is ready. Wait for the
+	# controller deployment so an immediate `make ingress` cannot race it.
+	kubectl -n kube-system rollout status \
+	  deployment/aws-load-balancer-controller \
+	  --timeout=180s
 
-ingress:  ## Create the podinfo ingress and wait for the ALB
+ingress:  ## Create the podinfo ingress and wait for the ALB hostname
 	kubectl apply -f k8s/manual/ingress.yaml
-	kubectl get ingress -n manual-managed -w
+	@echo "waiting for the podinfo ALB hostname..."
+	@for i in $$(seq 1 60); do \
+	  HOST=$$(kubectl get ingress podinfo -n manual-managed \
+	    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null); \
+	  if [ -n "$$HOST" ]; then \
+	    echo "ALB hostname: $$HOST"; \
+	    kubectl get ingress podinfo -n manual-managed; \
+	    exit 0; \
+	  fi; \
+	  sleep 3; \
+	done; \
+	echo "timed out waiting for the podinfo ALB hostname"; \
+	kubectl describe ingress podinfo -n manual-managed || true; \
+	exit 1
 
 # ---------- access ----------
 
