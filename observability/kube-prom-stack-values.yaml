@@ -1,7 +1,6 @@
 # small footprints, single node lab
 
 grafana:
-  adminPassword: mohan123    # lab only
   resources:
     requests:
       cpu: 50m
