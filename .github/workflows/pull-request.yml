@@ -55,6 +55,7 @@ jobs:
       # -backend=false skips S3 entirely, so no AWS credentials are needed.
       # still downloads providers, so validate can check resource schemas.
       - name: terraform validate
+        working-directory: terraform
         run: |
           terraform init -backend=false
           terraform validate

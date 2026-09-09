@@ -69,10 +69,10 @@ jobs:
 
           # create-or-update, since the configmap may already exist
           kubectl create configmap k6-smoke-script \
-            --from-file=k6/smoke.js -n $NS \
+            --from-file=k6/app/smoke.js -n $NS \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          sed "s|PLACEHOLDER|$TARGET|" k6/smoke-job.yaml \
+          sed "s|PLACEHOLDER|$TARGET|" k6/app/smoke-job.yaml \
             | kubectl apply -n $NS -f -
 
           # capture the result instead of letting a failure kill the step,

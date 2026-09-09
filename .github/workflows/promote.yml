@@ -93,10 +93,10 @@ jobs:
           kubectl delete job k6-smoke -n $NS --ignore-not-found
 
           kubectl create configmap k6-smoke-script \
-            --from-file=k6/smoke.js -n $NS \
+            --from-file=k6/app/smoke.js -n $NS \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          sed "s|PLACEHOLDER|$TARGET|" k6/smoke-job.yaml | kubectl apply -n $NS -f -
+          sed "s|PLACEHOLDER|$TARGET|" k6/app/smoke-job.yaml | kubectl apply -n $NS -f -
 
           kubectl wait --for=condition=complete job/k6-smoke -n $NS --timeout=120s \
             && RESULT=pass || RESULT=fail
@@ -120,10 +120,10 @@ jobs:
           kubectl delete job k6-load -n $NS --ignore-not-found
 
           kubectl create configmap k6-load-script \
-            --from-file=k6/load.js -n $NS \
+            --from-file=k6/app/load.js -n $NS \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          sed "s|PLACEHOLDER|$TARGET|" k6/load-job.yaml | kubectl apply -n $NS -f -
+          sed "s|PLACEHOLDER|$TARGET|" k6/app/load-job.yaml | kubectl apply -n $NS -f -
 
           kubectl wait --for=condition=complete job/k6-load -n $NS --timeout=360s \
             && RESULT=pass || RESULT=fail
