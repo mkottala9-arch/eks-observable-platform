@@ -1,4 +1,5 @@
 loki:
+  isDefault: false           # Prometheus remains Grafana's default data source
   persistence:
     enabled: false          # no persistent volume, logs live in memory/ephemeral
   resources:
