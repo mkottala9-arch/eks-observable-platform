@@ -2,9 +2,10 @@ CLUSTER     := eks-observable-platform
 REGION      := ap-south-2
 CHART       := application/helm
 
-# Must match the controller version the IAM policy was fetched for in
-# docs/runbook.md's "First time only" section. Bump both together.
-LBC_VERSION := v2.9.2
+# Keep the IAM policy, controller app version, and Helm chart on a verified
+# compatible set. Chart 1.9.2 declares appVersion v2.9.2. Bump together.
+LBC_VERSION       := v2.9.2
+LBC_CHART_VERSION := 1.9.2
 
 # Namespace the k6 gates run in. The workflows run them in the same namespace
 # as the release under test, so the in-cluster service name resolves.
@@ -47,12 +48,9 @@ platform:  ## Namespaces, podinfo, guardrails, metrics-server, RBAC
 	kubectl apply -f k8s/manual/resourcequota.yaml
 	kubectl apply -f k8s/manual/pdb.yaml
 	# deploy-roles.yaml creates namespaced Role/RoleBinding objects in
-	# app-dev and app-prod. Those namespaces are normally created later by
-	# `make app-dev`/`make app-prod` (--create-namespace) or by the CI
-	# pipeline, which is too late for a fresh cluster - kubectl apply on a
-	# namespaced object fails outright if its namespace doesn't exist yet.
-	# Creating them here (idempotently) means platform can run standalone
-	# and app-dev/app-prod are simply no-ops for kubectl apply thereafter.
+	# app-dev and app-prod. The manual Helm targets can create them, but the CI
+	# workflows expect them to exist already. Creating them here (idempotently)
+	# lets RBAC be applied during cluster setup before any application deploy.
 	kubectl create namespace app-dev --dry-run=client -o yaml | kubectl apply -f -
 	kubectl create namespace app-prod --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -f k8s/rbac/deploy-roles.yaml
@@ -71,11 +69,6 @@ monitoring:  ## Install Prometheus, Grafana, Loki, alert rules and dashboards
 	kubectl apply -f observability/grafana-dashboard-configmap.yaml
 	helm upgrade --install loki grafana/loki-stack \
 	  -n monitoring -f observability/loki-values.yaml
-	@echo
-	@echo "Loki registers itself as a default data source, which conflicts with"
-	@echo "Prometheus and crashes Grafana. Set isDefault to false, then restart:"
-	@echo "  kubectl edit configmap loki-loki-stack -n monitoring"
-	@echo "  kubectl rollout restart deployment kps-grafana -n monitoring"
 
 ingress-controller:  ## Install the AWS Load Balancer Controller
 	# Added here too (not just in `monitoring`) so this target works even if
@@ -90,14 +83,11 @@ ingress-controller:  ## Install the AWS Load Balancer Controller
 	  --attach-policy-arn=$$(aws iam list-policies --scope Local \
 	    --query "Policies[?PolicyName=='AWSLoadBalancerControllerIAMPolicy'].Arn" \
 	    --output text) --approve
-	# image.tag pins the controller binary to the same app version the IAM
-	# policy in docs/runbook.md was fetched for ($(LBC_VERSION)). The Helm
-	# chart version and the controller app version are versioned separately,
-	# so leaving this unset lets the chart install whatever controller
-	# version is currently latest - which can drift ahead of the policy's
-	# permissions without any error, just missing IAM actions at runtime.
+	# Pin both chart and controller image. The chart and app version are
+	# versioned separately; 1.9.2 is the verified chart for controller v2.9.2.
 	helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
 	  -n kube-system \
+	  --version $(LBC_CHART_VERSION) \
 	  --set clusterName=$(CLUSTER) \
 	  --set serviceAccount.create=false \
 	  --set serviceAccount.name=aws-load-balancer-controller \
@@ -265,7 +255,7 @@ clean-ingress:  ## Delete everything that owns an ALB, then wait for it to go
 	echo "load balancers still present after 5 minutes - check before destroying"; \
 	exit 1
 
-destroy: clean-ingress  ## Ordered teardown: ALBs, then eksctl stack, then terraform
+destroy: clean-ingress  ## Ordered teardown: ALBs, eksctl/IRSA OIDC, then terraform
 	@# A bare `-` prefix here would swallow EVERY failure, not just "already
 	@# deleted" - including a genuine eksctl failure - and fall straight
 	@# into terraform destroy, which is exactly the stranded-resource
@@ -283,5 +273,33 @@ destroy: clean-ingress  ## Ordered teardown: ALBs, then eksctl stack, then terra
 	  echo "error above (see docs/runbook.md 'Orphaned resources') and re-run"; \
 	  echo "'make destroy'."; \
 	  exit 1; \
+	fi
+	@# eksctl also created the cluster-specific IAM OIDC provider used by IRSA.
+	@# It is outside Terraform (the GitHub Actions OIDC provider is Terraform-
+	@# managed and is a different resource), so remove only the EKS issuer here.
+	@ISSUER=$$(aws eks describe-cluster --name $(CLUSTER) --region $(REGION) \
+	  --query "cluster.identity.oidc.issuer" --output text) || { \
+	    echo "Could not read the EKS OIDC issuer - stopping before terraform destroy."; exit 1; }; \
+	ACCOUNT_ID=$$(aws sts get-caller-identity --query Account --output text) || { \
+	  echo "Could not read the AWS account ID - stopping before terraform destroy."; exit 1; }; \
+	if [ -z "$$ISSUER" ] || [ "$$ISSUER" = "None" ] || [ -z "$$ACCOUNT_ID" ]; then \
+	  echo "Could not build the EKS OIDC provider ARN - stopping before terraform destroy."; \
+	  exit 1; \
+	fi; \
+	OIDC_HOSTPATH=$${ISSUER#https://}; \
+	OIDC_ARN="arn:aws:iam::$$ACCOUNT_ID:oidc-provider/$$OIDC_HOSTPATH"; \
+	FOUND=$$(aws iam list-open-id-connect-providers \
+	  --query "OpenIDConnectProviderList[?Arn=='$$OIDC_ARN'].Arn | [0]" \
+	  --output text); \
+	STATUS=$$?; \
+	if [ $$STATUS -ne 0 ]; then \
+	  echo "Could not check the EKS IAM OIDC provider - stopping before terraform destroy."; \
+	  exit 1; \
+	fi; \
+	if [ -n "$$FOUND" ] && [ "$$FOUND" != "None" ]; then \
+	  echo "deleting EKS IRSA OIDC provider $$OIDC_ARN"; \
+	  aws iam delete-open-id-connect-provider --open-id-connect-provider-arn "$$OIDC_ARN" || exit 1; \
+	else \
+	  echo "EKS IRSA OIDC provider already absent"; \
 	fi
 	terraform -chdir=terraform destroy
