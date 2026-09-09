@@ -14,7 +14,7 @@ The result is a single project that covers both sides of operating workloads on 
 - Use **GitHub Actions OIDC** and separate CI/dev/prod IAM roles so deployments use short-lived AWS credentials instead of stored access keys
 - Store immutable application images in **Amazon ECR** and promote the same tested image from development to production
 - Validate releases with **k6 smoke and load tests** after deployment instead of relying only on Kubernetes rollout health
-- Automatically run **Helm rollback** when production smoke or load validation fails, restoring the previous healthy revision while keeping the failed promotion visible
+- Automatically recover from failed production validation by restoring the **recorded healthy Helm revision**, or removing a failed first release when no previous production revision exists
 - Build a full **observability stack with Prometheus, Grafana, Alertmanager, Loki, and Promtail** for infrastructure, Kubernetes, container, application, and log visibility
 - Expose custom application metrics for **success ratio, HTTP errors, latency, deployed version, and fault mode**, and use them in dashboards and Prometheus alerts
 - Test the platform through controlled incidents covering **memory pressure, OOM and eviction, resource guardrails, HTTP 500 failures, node drain, release failure, and automated recovery**
@@ -66,7 +66,8 @@ The second stage added an owned application and a release path around the same E
 - Successful releases deploy automatically to `app-dev` and run a k6 smoke test
 - Production promotion is manual and protected by the GitHub `production` environment
 - Production runs smoke and load validation after the Helm rollout
-- Failed validation triggers `helm rollback` to the previous healthy revision
+- Production promotions are serialized so two workflows cannot modify `app-prod` at the same time
+- Failed validation restores the recorded healthy Helm revision; if the first production release fails, the failed release is removed because no rollback target exists
 - Prometheus and Grafana track success ratio, HTTP errors, latency, deployed version, and fault mode
 - Incident 05 deliberately promoted a bad production configuration and verified detection, alerting, and automated rollback
 
@@ -176,7 +177,7 @@ The pipeline is split into four workflows so pull-request validation, release cr
 | `pull-request.yml` | Runs unit tests, verifies the Docker build, validates Terraform and Helm, and scans the repository with Gitleaks |
 | `release.yml` | Accepts version tags only from commits on `main`, builds the application image, and pushes the versioned image to Amazon ECR |
 | `deploy-dev.yml` | Runs after a successful release, deploys the same image to `app-dev` with Helm, and runs a k6 smoke test |
-| `promote.yml` | Manually promotes an existing ECR image to `app-prod`, validates the release, and rolls back automatically if validation fails |
+| `promote.yml` | Manually promotes an existing ECR image to `app-prod`, serializes production changes, validates the release, and automatically restores or cleans up a failed release |
 
 ### Pull Request Validation
 
@@ -203,11 +204,13 @@ The image is not rebuilt for production. The exact image already published and t
 
 Production deployment is intentionally separate from development.
 
-Promotion requires manual approval through the GitHub `production` environment. After approval, the workflow:
+Promotion requires manual approval through the GitHub `production` environment. A workflow-level concurrency group allows only one `app-prod` promotion to run at a time, so a second manual promotion waits rather than racing the active Helm deployment or its validation gates.
+
+After approval, the workflow:
 
 1. assumes the production deployment role through GitHub OIDC
 2. verifies that the requested image exists in ECR
-3. records the currently deployed Helm revision
+3. records whether `app-prod` already exists and, when it does, its current healthy Helm revision
 4. deploys the selected version to `app-prod` with Helm
 5. runs the production k6 smoke test
 6. runs the sustained k6 load test if smoke validation passes
@@ -258,15 +261,21 @@ p95 latency < 1 s
 
 Smoke runs first so a fundamentally broken release fails quickly instead of waiting through the full load profile.
 
-If either production validation gate fails, GitHub Actions runs `helm rollback` (no revision argument, so Helm reverts to whichever release is immediately previous in its history). The revision recorded before deployment is used to report what was restored in the workflow summary, not passed into the rollback command itself.
+If either production validation gate fails and a healthy production release existed before deployment, GitHub Actions explicitly runs `helm rollback` against the revision recorded before the promotion. The rollback creates a new Helm revision whose state matches that known-good revision.
 
-The rollback restores the previous healthy release, while the GitHub Actions workflow remains failed so the unsuccessful promotion stays visible in CI/CD history.
+The first-ever production deployment is handled separately. If its validation fails, there is no earlier revision to restore, so the workflow uninstalls the failed `app-prod` release instead of attempting an invalid rollback.
+
+The production promotion workflow uses a concurrency group with `cancel-in-progress: false`, which ensures only one promotion can modify `app-prod` at a time. This keeps the recorded rollback target deterministic throughout deployment and validation.
+
+In both cases the GitHub Actions workflow remains failed, so the rejected promotion stays visible in CI/CD history.
 
 ![GitHub Actions showing failed validation and automated rollback](incidents/incident-05/github-actions-rollback.png)
 
 Incident 05 validated this path by promoting a production configuration that caused HTTP 500 responses. Kubernetes and Helm completed the rollout successfully, but the smoke test detected the application failure and triggered rollback to the previous healthy release.
 
 Helm history preserved both the failed upgrade and the rollback revision, while the application returned to its previous healthy version.
+
+The current workflow keeps the same recovery model but hardens it further by serializing production promotions and passing the recorded healthy revision explicitly to `helm rollback`. It also handles a failed first-ever production deployment by uninstalling that failed release when no previous revision exists.
 
 ## Observability
 

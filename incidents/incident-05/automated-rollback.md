@@ -191,6 +191,8 @@ The smoke test failed while the promotion workflow was still active.
 
 Because the workflow had recorded the previous working Helm revision before deployment, the validation failure could immediately trigger rollback.
 
+The incident evidence reflects the workflow used during this test. The current promotion workflow keeps the same recovery principle but now passes the recorded healthy revision explicitly to `helm rollback`, serializes production promotions, and handles a failed first-ever production deployment by removing the failed release when no previous revision exists.
+
 The `AppHighErrorRate` alert detected the same application failure through continuous monitoring, but its `for: 2m` condition intentionally required the failure to persist before firing.
 
 The two mechanisms serve different purposes:
