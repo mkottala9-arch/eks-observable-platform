@@ -401,9 +401,26 @@ helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-contro
   --set vpcId=$(aws eks describe-cluster --name eks-observable-platform \
     --region ap-south-2 --query "cluster.resourcesVpcConfig.vpcId" --output text)
 
-# The ALB address usually takes 2-3 minutes to appear.
+# Helm can finish before the admission webhook has endpoints. Wait for the
+# controller deployment before creating an Ingress.
+kubectl -n kube-system rollout status \
+  deployment/aws-load-balancer-controller \
+  --timeout=180s
+
 kubectl apply -f k8s/manual/ingress.yaml       # make ingress
-kubectl get ingress -n manual-managed -w
+
+# Wait until the controller has populated the ALB hostname, then exit instead
+# of leaving an endless kubectl watch running.
+for i in $(seq 1 60); do
+  HOST=$(kubectl get ingress podinfo -n manual-managed \
+    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+  if [ -n "$HOST" ]; then
+    echo "ALB hostname: $HOST"
+    kubectl get ingress podinfo -n manual-managed
+    break
+  fi
+  sleep 3
+done
 ```
 
 ## Deploying the application
@@ -432,22 +449,71 @@ that deploys cleanly and then serves errors — that is what the k6 gates are fo
 See incident 05.
 
 `make app-prod` is a manual deployment path; it does not reproduce the GitHub
-Actions promotion gates or automated rollback. To validate an equivalent manual
+Actions promotion gates or automated recovery. To validate an equivalent manual
 deploy, follow it with `make smoke NS=app-prod` and `make load NS=app-prod`, then
-roll back manually if either gate fails.
+restore a known-good revision manually if either gate fails.
 
-### Rollback
+### Production workflow recovery
+
+`promote.yml` serializes production promotions with:
+
+```yaml
+concurrency:
+  group: app-prod-promotion
+  cancel-in-progress: false
+```
+
+A second manual promotion therefore waits for the active one instead of
+modifying the same Helm release while its deployment or validation gates are
+running.
+
+Before the Helm upgrade, the workflow checks whether `app-prod` already exists.
+When it does, the current healthy Helm revision is recorded and later used as
+the explicit rollback target if smoke or load validation fails:
 
 ```bash
-helm rollback app-prod -n app-prod --wait --timeout 5m
+helm rollback app-prod <healthy-revision> \
+  -n app-prod --wait --timeout 5m
+```
+
+Helm records the rollback as a new revision rather than deleting the failed
+upgrade, so the release history keeps both the rejected promotion and recovery.
+
+For the first-ever production deployment there is no earlier Helm revision. If
+that first release completes its Kubernetes rollout but then fails k6
+validation, the workflow removes the failed release instead:
+
+```bash
+helm uninstall app-prod -n app-prod --wait
+```
+
+The workflow itself remains failed in either recovery path so the rejected
+promotion stays visible in GitHub Actions.
+
+### Promotion edge cases
+
+| Situation | Recovery / control |
+|---|---|
+| New pods cannot become Ready | Helm `--atomic --wait` handles rollout failure |
+| Healthy rollout serves bad responses | k6 gate fails and the recorded healthy revision is restored |
+| First-ever prod release fails validation | Failed release is uninstalled because no previous revision exists |
+| Two prod promotions are triggered together | Concurrency queues the later promotion |
+| Monitoring alert fires outside deployment | Alerting provides visibility; it does not trigger rollback |
+
+### Manual rollback
+
+Inspect Helm history and choose the known-good revision explicitly:
+
+```bash
+helm history app-prod -n app-prod
+helm rollback app-prod <healthy-revision> -n app-prod --wait --timeout 5m
 helm history app-prod -n app-prod
 ```
 
-The rollback is recorded as a new revision rather than removing the failed one,
-so the history keeps both. Note that `helm history` shows `APP VERSION 1.0.0` on
-every revision, because the image tag is supplied through values rather than the
-chart's `appVersion`. Use the Deployed Version panel in Grafana, which reads
-`app_build_info`, to see which application version is actually running.
+Note that `helm history` shows `APP VERSION 1.0.0` on every revision because the
+image tag is supplied through values rather than the chart's `appVersion`. Use
+the Deployed Version panel in Grafana, which reads `app_build_info`, to see which
+application version is actually running.
 
 ## Load testing
 
@@ -464,8 +530,9 @@ make load  NS=app-prod
 
 The smoke test is a fast check that fails a bad release in about twenty seconds.
 The load test applies sustained traffic and produces a visible curve in Grafana.
-The pipeline runs smoke first; if it fails, load is skipped and the rollback
-step fires.
+The pipeline runs smoke first; if it fails, load is skipped and the recovery
+step fires. An existing production release is restored to the recorded healthy
+revision; a failed first-ever production release is uninstalled.
 
 ### Project 1 — load against podinfo
 
