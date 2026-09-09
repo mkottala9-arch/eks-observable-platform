@@ -10,12 +10,12 @@ resource "aws_eks_access_entry" "dev_deploy" {
   cluster_name      = aws_eks_cluster.main.name
   principal_arn     = aws_iam_role.dev_deploy.arn
   type              = "STANDARD"
-  kubernetes_groups = ["app-deployers"]
+  kubernetes_groups = ["app-dev-deployers"]
 }
 
-# attaches actual permissions, scoped to one namespace. this is what stops
-# dev-deploy from touching app-prod - IAM can't, because helm talks to the
-# kubernetes api, not to aws.
+# attaches AWS-managed Kubernetes permissions, scoped to app-dev. The access
+# entry also uses a dev-only RBAC group for ServiceMonitor permissions, so the
+# two additive permission paths stay isolated to the same namespace.
 resource "aws_eks_access_policy_association" "dev_deploy" {
   cluster_name  = aws_eks_cluster.main.name
   principal_arn = aws_iam_role.dev_deploy.arn
@@ -35,7 +35,7 @@ resource "aws_eks_access_entry" "prod_deploy" {
   cluster_name      = aws_eks_cluster.main.name
   principal_arn     = aws_iam_role.prod_deploy.arn
   type              = "STANDARD"
-  kubernetes_groups = ["app-deployers"]
+  kubernetes_groups = ["app-prod-deployers"]
 }
 
 resource "aws_eks_access_policy_association" "prod_deploy" {
