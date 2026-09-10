@@ -236,7 +236,7 @@ status:  ## Show pods across all project namespaces
 	  kubectl get pods -n $$ns 2>/dev/null || echo "  (absent)"; \
 	done
 
-verify:  ## Check for load balancers and non-default security groups in the VPC
+verify:  ## Check ALBs, target groups and security groups in the cluster VPC
 	@VPC=$$(aws eks describe-cluster --name $(CLUSTER) --region $(REGION) \
 	  --query "cluster.resourcesVpcConfig.vpcId" --output text 2>/dev/null); \
 	if [ -z "$$VPC" ] || [ "$$VPC" = "None" ]; then \
@@ -244,36 +244,171 @@ verify:  ## Check for load balancers and non-default security groups in the VPC
 	else \
 	  echo "--- load balancers"; \
 	  aws elbv2 describe-load-balancers --region $(REGION) \
-	    --query "LoadBalancers[?VpcId=='$$VPC'].LoadBalancerName" --output text; \
-	  echo "--- non-default security groups (includes EKS-managed ones, not only the LBC's)"; \
+	    --query "LoadBalancers[?VpcId=='$$VPC'].[LoadBalancerName,State.Code]" \
+	    --output table --no-cli-pager; \
+	  echo "--- target groups"; \
+	  aws elbv2 describe-target-groups --region $(REGION) \
+	    --query "TargetGroups[?VpcId=='$$VPC'].[TargetGroupName,TargetType]" \
+	    --output table --no-cli-pager; \
+	  echo "--- LBC-owned security groups"; \
+	  aws ec2 describe-security-groups --region $(REGION) \
+	    --filters Name=vpc-id,Values=$$VPC \
+	      Name=tag:elbv2.k8s.aws/cluster,Values=$(CLUSTER) \
+	    --query 'SecurityGroups[].{ID:GroupId,Name:GroupName,Description:Description}' \
+	    --output table --no-cli-pager; \
+	  echo "--- all non-default security groups"; \
 	  aws ec2 describe-security-groups --region $(REGION) \
 	    --filters Name=vpc-id,Values=$$VPC \
 	    --query 'SecurityGroups[?GroupName!=`default`].[GroupId,GroupName]' \
-	    --output text; \
+	    --output table --no-cli-pager; \
 	fi
 
 # ---------- teardown ----------
 
-# The load balancer controller creates ALBs that terraform does not manage.
-# If the cluster goes first the controller is gone and nothing can delete them,
-# and the VPC delete then fails on the ENIs the ALB still holds.
-clean-ingress:  ## Delete everything that owns an ALB, then wait for it to go
-	-kubectl delete -f k8s/manual/ingress.yaml --ignore-not-found
-	-helm uninstall app-prod -n app-prod
-	-helm uninstall app-dev -n app-dev
-	@echo "waiting for load balancers to disappear..."
-	@VPC=$$(aws eks describe-cluster --name $(CLUSTER) --region $(REGION) \
-	  --query "cluster.resourcesVpcConfig.vpcId" --output text); \
-	for i in $$(seq 1 30); do \
-	  COUNT=$$(aws elbv2 describe-load-balancers --region $(REGION) \
-	    --query "length(LoadBalancers[?VpcId=='$$VPC'])" --output text); \
-	  if [ "$$COUNT" = "0" ]; then echo "clear"; exit 0; fi; \
-	  echo "  $$COUNT remaining"; sleep 10; \
+# The AWS Load Balancer Controller creates ALBs, target groups and security
+# groups outside Terraform. Kubernetes objects must be removed while the
+# controller is still running so it can reconcile those AWS resources.
+#
+# The live teardown test showed that "ALBs = 0" is not sufficient: a target
+# group plus the controller-managed frontend/shared-backend security groups can
+# remain and block aws_vpc.main with DependencyViolation. clean-ingress therefore
+# waits for ALBs, gives the controller time to remove target groups, then safely
+# removes any remaining controller-owned target groups/security groups before
+# Terraform is allowed to destroy EKS/VPC.
+clean-ingress:  ## Remove ALB owners and clear LBC AWS dependencies before Terraform
+	@set -eu; \
+	VPC=$$(aws eks describe-cluster \
+	  --name $(CLUSTER) \
+	  --region $(REGION) \
+	  --query "cluster.resourcesVpcConfig.vpcId" \
+	  --output text); \
+	if [ -z "$$VPC" ] || [ "$$VPC" = "None" ]; then \
+	  echo "could not determine the cluster VPC - stopping before teardown"; \
+	  exit 1; \
+	fi; \
+	echo "cluster VPC: $$VPC"; \
+	echo; \
+	echo "removing Kubernetes/Helm objects that own load balancers..."; \
+	kubectl delete -f k8s/manual/ingress.yaml \
+	  --ignore-not-found --wait=true || exit 1; \
+	if helm status app-prod -n app-prod >/dev/null 2>&1; then \
+	  helm uninstall app-prod -n app-prod --wait --timeout 5m || exit 1; \
+	else \
+	  echo "app-prod already absent"; \
+	fi; \
+	if helm status app-dev -n app-dev >/dev/null 2>&1; then \
+	  helm uninstall app-dev -n app-dev --wait --timeout 5m || exit 1; \
+	else \
+	  echo "app-dev already absent"; \
+	fi; \
+	echo; \
+	echo "waiting for load balancers in $$VPC to disappear..."; \
+	LB_CLEAR=false; \
+	for i in $$(seq 1 60); do \
+	  LB_COUNT=$$(aws elbv2 describe-load-balancers \
+	    --region $(REGION) \
+	    --query "length(LoadBalancers[?VpcId=='$$VPC'])" \
+	    --output text); \
+	  echo "  ALBs remaining: $$LB_COUNT"; \
+	  if [ "$$LB_COUNT" = "0" ]; then \
+	    LB_CLEAR=true; \
+	    break; \
+	  fi; \
+	  sleep 10; \
 	done; \
-	echo "load balancers still present after 5 minutes - check before destroying"; \
-	exit 1
+	if [ "$$LB_CLEAR" != "true" ]; then \
+	  echo; \
+	  echo "load balancers still exist after 10 minutes."; \
+	  echo "Stopping while EKS and the controller still exist."; \
+	  aws elbv2 describe-load-balancers \
+	    --region $(REGION) \
+	    --query "LoadBalancers[?VpcId=='$$VPC'].[LoadBalancerName,State.Code]" \
+	    --output table --no-cli-pager; \
+	  exit 1; \
+	fi; \
+	echo; \
+	echo "ALBs are gone. Giving the controller time to remove target groups..."; \
+	TG_CLEAR=false; \
+	for i in $$(seq 1 30); do \
+	  TG_COUNT=$$(aws elbv2 describe-target-groups \
+	    --region $(REGION) \
+	    --query "length(TargetGroups[?VpcId=='$$VPC' && starts_with(TargetGroupName, 'k8s-')])" \
+	    --output text); \
+	  echo "  k8s target groups remaining: $$TG_COUNT"; \
+	  if [ "$$TG_COUNT" = "0" ]; then \
+	    TG_CLEAR=true; \
+	    break; \
+	  fi; \
+	  sleep 10; \
+	done; \
+	if [ "$$TG_CLEAR" != "true" ]; then \
+	  echo "controller left target groups after 5 minutes; deleting only"; \
+	  echo "k8s-* target groups in the dedicated cluster VPC."; \
+	  for TG in $$(aws elbv2 describe-target-groups \
+	    --region $(REGION) \
+	    --query "TargetGroups[?VpcId=='$$VPC' && starts_with(TargetGroupName, 'k8s-')].TargetGroupArn" \
+	    --output text); do \
+	      echo "deleting target group $$TG"; \
+	      aws elbv2 delete-target-group \
+	        --region $(REGION) \
+	        --target-group-arn "$$TG" \
+	        --no-cli-pager || exit 1; \
+	  done; \
+	fi; \
+	echo; \
+	echo "checking controller-owned security groups..."; \
+	LBC_SGS=$$(aws ec2 describe-security-groups \
+	  --region $(REGION) \
+	  --filters Name=vpc-id,Values=$$VPC \
+	    Name=tag:elbv2.k8s.aws/cluster,Values=$(CLUSTER) \
+	  --query 'SecurityGroups[].GroupId' \
+	  --output text); \
+	if [ -n "$$LBC_SGS" ] && [ "$$LBC_SGS" != "None" ]; then \
+	  for SG in $$LBC_SGS; do \
+	    echo "deleting LBC security group $$SG"; \
+	    if ! aws ec2 delete-security-group \
+	      --region $(REGION) \
+	      --group-id "$$SG" \
+	      --no-cli-pager; then \
+	      echo; \
+	      echo "could not delete LBC security group $$SG."; \
+	      echo "A security-group dependency still exists. Stopping BEFORE"; \
+	      echo "EKS/Terraform destruction so it can be inspected safely."; \
+	      echo; \
+	      aws ec2 describe-security-groups \
+	        --region $(REGION) \
+	        --group-ids "$$SG" \
+	        --output table --no-cli-pager || true; \
+	      exit 1; \
+	    fi; \
+	  done; \
+	else \
+	  echo "no LBC-owned security groups remain"; \
+	fi; \
+	echo; \
+	echo "final LBC dependency check..."; \
+	LB_COUNT=$$(aws elbv2 describe-load-balancers \
+	  --region $(REGION) \
+	  --query "length(LoadBalancers[?VpcId=='$$VPC'])" \
+	  --output text); \
+	TG_COUNT=$$(aws elbv2 describe-target-groups \
+	  --region $(REGION) \
+	  --query "length(TargetGroups[?VpcId=='$$VPC' && starts_with(TargetGroupName, 'k8s-')])" \
+	  --output text); \
+	SG_COUNT=$$(aws ec2 describe-security-groups \
+	  --region $(REGION) \
+	  --filters Name=vpc-id,Values=$$VPC \
+	    Name=tag:elbv2.k8s.aws/cluster,Values=$(CLUSTER) \
+	  --query 'length(SecurityGroups)' \
+	  --output text); \
+	echo "  ALBs=$$LB_COUNT target-groups=$$TG_COUNT LBC-security-groups=$$SG_COUNT"; \
+	if [ "$$LB_COUNT" != "0" ] || [ "$$TG_COUNT" != "0" ] || [ "$$SG_COUNT" != "0" ]; then \
+	  echo "LBC AWS dependencies still remain - stopping before Terraform."; \
+	  exit 1; \
+	fi; \
+	echo "LBC cloud dependencies cleared"
 
-destroy: clean-ingress  ## Ordered teardown: ALBs, eksctl/IRSA OIDC, then terraform
+destroy: clean-ingress  ## Ordered teardown: LBC AWS deps, eksctl/IRSA OIDC, then Terraform
 	@# A bare `-` prefix here would swallow EVERY failure, not just "already
 	@# deleted" - including a genuine eksctl failure - and fall straight
 	@# into terraform destroy, which is exactly the stranded-resource
