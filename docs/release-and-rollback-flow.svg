@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1430" viewBox="0 0 1800 1430" role="img" aria-labelledby="title desc">
+<title id="title">EKS Observable Platform — release validation and recovery</title><desc id="desc">Release workflow builds a tag, deploy-dev consumes a successful release, and manual promote chooses an existing tag. The production workflow uses environment-scoped OIDC, records the prior Helm revision, deploys with atomic recovery, and runs smoke then load tests. Failed validation restores the recorded revision or uninstalls a first release. Alertmanager does not trigger rollback.</desc>
+<rect x="0" y="0" width="1800" height="1430" rx="0" fill="#f3f6fa" stroke="none" stroke-width="1.5"/>
+<rect x="0" y="0" width="1800" height="127" rx="0" fill="#14243b" stroke="none" stroke-width="1.5"/>
+<text x="40" y="53" font-family="DejaVu Sans, sans-serif" font-size="37" fill="#ffffff" font-weight="bold" text-anchor="start">Release validation &amp; recovery</text>
+<text x="40" y="94" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#cbd9e9" font-weight="normal" text-anchor="start">Implemented control flow  •  GitHub Actions + OIDC + Helm + k6  •  Source snapshot f70bce8</text>
+<text x="40" y="177" font-family="DejaVu Sans, sans-serif" font-size="28" fill="#14243b" font-weight="bold" text-anchor="start">Build and validate an image</text>
+<rect x="40" y="204" width="500" height="202" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="40" y="204" width="6" height="202" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="63" y="238" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">Pull request → main</text>
+<text x="63" y="272" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">6 unit tests + Docker build</text>
+<text x="63" y="301" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Terraform fmt / validate + Helm lint</text>
+<text x="63" y="330" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Gitleaks history scan</text>
+<text x="63" y="359" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">This workflow does not deploy</text>
+<rect x="649" y="204" width="500" height="202" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="649" y="204" width="6" height="202" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="672" y="238" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">Push version tag v*</text>
+<text x="672" y="272" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Require tagged commit to be on main</text>
+<text x="672" y="301" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">GitHub OIDC → CI role → ECR push</text>
+<text x="672" y="330" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Image embeds APP_VERSION / GIT_COMMIT</text>
+<text x="672" y="359" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Immutable ECR tag; scan-on-push</text>
+<rect x="1260" y="204" width="500" height="202" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1260" y="204" width="6" height="202" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="1283" y="238" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">Successful release → app-dev</text>
+<text x="1283" y="272" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Check out the released commit</text>
+<text x="1283" y="301" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Dev OIDC role → Helm --wait</text>
+<text x="1283" y="330" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">k6 smoke: 5 VUs · 20 seconds</text>
+<text x="1283" y="359" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Failure marks dev run failed; no rollback</text>
+<polyline points="540,296 649,296" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="649,296 637.0,291.0 637.0,301.0" fill="#2563b9"/>
+<text x="562" y="273" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#2563b9" font-weight="normal" text-anchor="start">tag</text>
+<polyline points="1149,296 1260,296" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1260,296 1248.0,291.0 1248.0,301.0" fill="#2563b9"/>
+<text x="1165" y="273" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#2563b9" font-weight="normal" text-anchor="start">success</text>
+<rect x="40" y="441" width="1720" height="95" rx="15" fill="#eef4fd" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="64" y="477" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#2563b9" font-weight="bold" text-anchor="start">Manual workflow_dispatch(image_tag)</text>
+<text x="64" y="511" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Promotes an existing image without rebuilding it. The operator chooses the tag; successful dev validation is not checked by this workflow.</text>
+<text x="40" y="584" font-family="DejaVu Sans, sans-serif" font-size="28" fill="#14243b" font-weight="bold" text-anchor="start">Production promotion — one active run in concurrency group app-prod-promotion</text>
+<rect x="40" y="609" width="501" height="247" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="40" y="609" width="6" height="247" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="63" y="643" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">1  Authorize and record</text>
+<text x="63" y="677" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">production environment rules apply*</text>
+<text x="63" y="706" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">GitHub OIDC → prod-deploy IAM role</text>
+<text x="63" y="735" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Verify image tag exists in ECR</text>
+<text x="63" y="764" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Build kubeconfig; namespace app-prod</text>
+<text x="63" y="793" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Record current revision, if one exists</text>
+<text x="63" y="822" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Prior app health is not revalidated</text>
+<rect x="650" y="609" width="500" height="247" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="650" y="609" width="6" height="247" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="673" y="643" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">2  Deploy selected image</text>
+<text x="673" y="677" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Helm upgrade --install app-prod</text>
+<text x="673" y="706" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Production values from dispatch checkout</text>
+<text x="673" y="735" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">--atomic --wait --timeout 5m</text>
+<text x="673" y="764" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">2 replicas; probes, resources and PDB</text>
+<text x="673" y="793" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Ready pods can still return HTTP 500</text>
+<text x="673" y="822" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">A completed rollout proceeds to k6</text>
+<rect x="1260" y="609" width="500" height="247" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1260" y="609" width="6" height="247" rx="3" fill="#087f83" stroke="none" stroke-width="1.5"/>
+<text x="1283" y="643" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#087f83" font-weight="bold" text-anchor="start">3  Validate through ClusterIP</text>
+<text x="1283" y="677" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Smoke: 5 VUs · 20s</text>
+<text x="1283" y="706" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">HTTP failures = 0; p95 &lt; 500 ms</text>
+<text x="1283" y="735" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Then load: 30s / 2m / 30s, max 10 VUs</text>
+<text x="1283" y="764" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">HTTP failures &lt; 1%; p95 &lt; 1 second</text>
+<text x="1283" y="793" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Jobs run inside app-prod</text>
+<text x="1283" y="822" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Public ALB path is not exercised</text>
+<polyline points="541,732 650,732" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="650,732 638.0,727.0 638.0,737.0" fill="#2563b9"/>
+<polyline points="1150,732 1260,732" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1260,732 1248.0,727.0 1248.0,737.0" fill="#2563b9"/>
+<polyline points="900,856 900,895 294,895 294,963" fill="none" stroke="#be4653" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="294,963 299.0,951.0 289.0,951.0" fill="#be4653"/>
+<text x="507" y="886" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#be4653" font-weight="normal" text-anchor="start">rollout fails</text>
+<polyline points="1510,856 1510,963" fill="none" stroke="#be4653" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1510,963 1515.0,951.0 1505.0,951.0" fill="#be4653"/>
+<text x="1527" y="911" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#be4653" font-weight="normal" text-anchor="start">gate fails</text>
+<rect x="40" y="963" width="501" height="213" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="40" y="963" width="6" height="213" rx="3" fill="#be4653" stroke="none" stroke-width="1.5"/>
+<text x="63" y="997" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#be4653" font-weight="bold" text-anchor="start">Helm owns rollout recovery</text>
+<text x="63" y="1031" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Upgrade failure: atomic rollback</text>
+<text x="63" y="1060" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">First install failure: atomic cleanup</text>
+<text x="63" y="1089" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">The custom k6 recovery step is skipped</text>
+<text x="63" y="1118" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Promotion remains failed</text>
+<rect x="650" y="963" width="500" height="213" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="650" y="963" width="6" height="213" rx="3" fill="#087f83" stroke="none" stroke-width="1.5"/>
+<text x="673" y="997" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#087f83" font-weight="bold" text-anchor="start">Both gates pass</text>
+<text x="673" y="1031" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Selected release remains deployed</text>
+<text x="673" y="1060" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Promotion succeeds</text>
+<text x="673" y="1089" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Metrics and logs continue independently</text>
+<text x="673" y="1118" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">No later alert-triggered rollback</text>
+<polyline points="1260,825 1225,825 1225,927 900,927 900,963" fill="none" stroke="#087f83" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="900,963 905.0,951.0 895.0,951.0" fill="#087f83"/>
+<text x="928" y="918" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#087f83" font-weight="normal" text-anchor="start">both pass</text>
+<rect x="1260" y="963" width="500" height="213" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1260" y="963" width="6" height="213" rx="3" fill="#be4653" stroke="none" stroke-width="1.5"/>
+<text x="1283" y="997" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#be4653" font-weight="bold" text-anchor="start">Workflow owns validation recovery</text>
+<text x="1283" y="1031" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Previous release exists:</text>
+<text x="1283" y="1060" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">  helm rollback to the recorded revision</text>
+<text x="1283" y="1089" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">No previous release:</text>
+<text x="1283" y="1118" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">  helm uninstall the failed first release</text>
+<text x="1283" y="1147" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Promotion remains failed</text>
+<rect x="40" y="1210" width="1720" height="124" rx="15" fill="#f5fafb" stroke="#9fc7c9" stroke-width="1.5"/>
+<text x="64" y="1247" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#087f83" font-weight="bold" text-anchor="start">Independent runtime detection</text>
+<text x="64" y="1282" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#14243b" font-weight="normal" text-anchor="start">Prometheus scrapes metrics and evaluates rules → Alertmanager. Grafana queries Prometheus + Loki; Promtail supplies container logs.</text>
+<text x="64" y="1312" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Alerts do not invoke this workflow. Recovery waits for Kubernetes readiness but does not repeat the k6 gate after rollback.</text>
+<text x="40" y="1371" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">* Required reviewers must be configured in GitHub. Namespace-scoped EKS access + ServiceMonitor RBAC control deployment permissions.</text>
+<text x="40" y="1405" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Concurrency protects the active run; with the default queue policy, a newer pending run can replace an older pending run.</text>
+</svg>

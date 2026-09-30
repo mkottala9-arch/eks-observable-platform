@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1870" viewBox="0 0 1800 1870" role="img" aria-labelledby="title desc">
+<title id="title">EKS Observable Platform — implementation architecture</title><desc id="desc">Architecture derived from commit f70bce8. Terraform provisions AWS infrastructure. Two public ALBs target pod IPs for podinfo and production. Dev is internal. All workloads and monitoring share one managed node group in one public subnet. Prometheus scrapes metrics and evaluates alerts; Grafana queries Prometheus and Loki; Promtail pushes logs to Loki. GitHub Actions builds tagged images and deploys through OIDC roles.</desc>
+<rect x="0" y="0" width="1800" height="1870" rx="0" fill="#f3f6fa" stroke="none" stroke-width="1.5"/>
+<rect x="0" y="0" width="1800" height="127" rx="0" fill="#14243b" stroke="none" stroke-width="1.5"/>
+<text x="40" y="53" font-family="DejaVu Sans, sans-serif" font-size="37" fill="#ffffff" font-weight="bold" text-anchor="start">EKS Observable Platform</text>
+<text x="40" y="94" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#cbd9e9" font-weight="normal" text-anchor="start">Implementation architecture  •  AWS ap-south-2  •  Source snapshot f70bce8  •  Learning lab</text>
+<rect x="40" y="154" width="545" height="176" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="40" y="154" width="6" height="176" rx="3" fill="#b66b13" stroke="none" stroke-width="1.5"/>
+<text x="63" y="188" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#b66b13" font-weight="bold" text-anchor="start">Manual infrastructure provisioning</text>
+<text x="63" y="222" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Operator → Makefile → Terraform</text>
+<text x="63" y="251" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">VPC · EKS · node group · ECR · IAM / OIDC</text>
+<text x="63" y="280" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">S3 state + native locking; bucket pre-created</text>
+<rect x="607" y="154" width="568" height="176" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="607" y="154" width="6" height="176" rx="3" fill="#b66b13" stroke="none" stroke-width="1.5"/>
+<text x="630" y="188" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#b66b13" font-weight="bold" text-anchor="start">AWS network foundation</text>
+<text x="630" y="222" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">VPC 10.0.0.0/16 + Internet Gateway</text>
+<text x="630" y="251" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Public subnets: 10.0.0.0/24 and 10.0.1.0/24</text>
+<text x="630" y="280" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Two AZs for subnet coverage; no NAT Gateway</text>
+<rect x="1197" y="154" width="563" height="176" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1197" y="154" width="6" height="176" rx="3" fill="#b66b13" stroke="none" stroke-width="1.5"/>
+<text x="1220" y="188" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#b66b13" font-weight="bold" text-anchor="start">AWS-managed EKS control plane</text>
+<text x="1220" y="222" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Cluster: eks-observable-platform</text>
+<text x="1220" y="251" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Both subnets supplied to EKS</text>
+<text x="1220" y="280" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Access entries + namespace-scoped RBAC</text>
+<rect x="40" y="359" width="1720" height="1043" rx="15" fill="#ffffff" stroke="#8faac6" stroke-width="1.5"/>
+<text x="65" y="399" font-family="DejaVu Sans, sans-serif" font-size="28" fill="#14243b" font-weight="bold" text-anchor="start">Runtime access &amp; EKS workloads — logical view</text>
+<text x="65" y="433" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#53657d" font-weight="normal" text-anchor="start">Shared managed node group: m7i-flex.large · desired/min 1, max 2 · workers only in subnet 10.0.0.0/24 (one AZ)</text>
+<text x="65" y="460" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">ALBs are AWS resources outside Kubernetes. Namespace boxes do not imply separate networks or dedicated workers.</text>
+<rect x="72" y="512" width="232" height="94" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="72" y="512" width="6" height="94" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="95" y="546" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">Internet clients</text>
+<text x="95" y="580" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#53657d" font-weight="normal" text-anchor="start">Public HTTP</text>
+<rect x="386" y="512" width="305" height="94" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="386" y="512" width="6" height="94" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="409" y="546" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">ALB · podinfo</text>
+<text x="409" y="580" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">IP targets · port 9898</text>
+<rect x="787" y="512" width="305" height="94" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="787" y="512" width="6" height="94" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="810" y="546" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">ALB · app-prod</text>
+<text x="810" y="580" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">IP targets · port 8080</text>
+<polyline points="304,558 386,558" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="386,558 374.0,553.0 374.0,563.0" fill="#2563b9"/>
+<polyline points="329,558 329,489 938,489 938,512" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="938,512 943.0,500.0 933.0,500.0" fill="#2563b9"/>
+<text x="527" y="483" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#2563b9" font-weight="normal" text-anchor="start">Two independent internet-facing ALBs</text>
+<rect x="72" y="630" width="267" height="118" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="72" y="630" width="6" height="118" rx="3" fill="#b66b13" stroke="none" stroke-width="1.5"/>
+<text x="95" y="664" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#b66b13" font-weight="bold" text-anchor="start">AWS LB Controller</text>
+<text x="95" y="698" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">kube-system · IRSA</text>
+<text x="95" y="727" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Reconciles both Ingresses</text>
+<text x="386" y="638" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Ingress + Service selectors discover pod endpoints;</text>
+<text x="386" y="663" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">ALBs send requests directly to those pod IPs.</text>
+<polyline points="539,606 539,616 361,616 361,762 233,762 233,776" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="233,776 238.0,764.0 228.0,764.0" fill="#2563b9"/>
+<polyline points="940,606 940,718 590,718 590,776" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="590,776 595.0,764.0 585.0,764.0" fill="#2563b9"/>
+<rect x="72" y="776" width="326" height="259" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="72" y="776" width="6" height="259" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="95" y="810" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">manual-managed</text>
+<text x="95" y="844" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">podinfo × 2 · :9898</text>
+<text x="95" y="873" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">ClusterIP Service + Ingress</text>
+<text x="95" y="902" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Requests / limits + PDB</text>
+<text x="95" y="931" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">LimitRange + ResourceQuota</text>
+<text x="95" y="960" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Optional memory-hog tests</text>
+<text x="95" y="989" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">ServiceMonitor: /metrics</text>
+<rect x="427" y="776" width="326" height="259" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="427" y="776" width="6" height="259" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="450" y="810" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">app-prod</text>
+<text x="450" y="844" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Flask / Gunicorn × 2 · :8080</text>
+<text x="450" y="873" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">ClusterIP Service + Ingress</text>
+<text x="450" y="902" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Probes + limits + PDB</text>
+<text x="450" y="931" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Hardened container + /tmp</text>
+<text x="450" y="960" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">k6 smoke + load Jobs</text>
+<text x="450" y="989" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">ServiceMonitor: /metrics</text>
+<rect x="782" y="776" width="310" height="259" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="782" y="776" width="6" height="259" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="805" y="810" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">app-dev</text>
+<text x="805" y="844" font-family="DejaVu Sans, sans-serif" font-size="17.5" fill="#53657d" font-weight="normal" text-anchor="start">Flask / Gunicorn × 1</text>
+<text x="805" y="873" font-family="DejaVu Sans, sans-serif" font-size="17.5" fill="#53657d" font-weight="normal" text-anchor="start">ClusterIP :8080 only</text>
+<text x="805" y="902" font-family="DejaVu Sans, sans-serif" font-size="17.5" fill="#53657d" font-weight="normal" text-anchor="start">Probes + limits; no PDB</text>
+<text x="805" y="931" font-family="DejaVu Sans, sans-serif" font-size="17.5" fill="#53657d" font-weight="normal" text-anchor="start">Hardened container + /tmp</text>
+<text x="805" y="960" font-family="DejaVu Sans, sans-serif" font-size="17.5" fill="#53657d" font-weight="normal" text-anchor="start">k6 smoke Job</text>
+<text x="805" y="989" font-family="DejaVu Sans, sans-serif" font-size="17.5" fill="#53657d" font-weight="normal" text-anchor="start">ServiceMonitor: /metrics</text>
+<rect x="72" y="1060" width="1020" height="69" rx="15" fill="#f2f6fc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="92" y="1089" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#2563b9" font-weight="bold" text-anchor="start">k6-testing: podinfo load Pod → podinfo ClusterIP :9898</text>
+<text x="92" y="1115" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Application k6 Jobs use their own namespace’s ClusterIP service and bypass the public ALB.</text>
+<rect x="72" y="1160" width="1020" height="88" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="72" y="1160" width="6" height="88" rx="3" fill="#087f83" stroke="none" stroke-width="1.5"/>
+<text x="95" y="1194" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#087f83" font-weight="bold" text-anchor="start">Metrics sources</text>
+<text x="95" y="1228" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Workload /metrics · kube-state-metrics · node-exporter · kubelet / cAdvisor</text>
+<rect x="72" y="1272" width="1020" height="66" rx="15" fill="#f7f2fc" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="92" y="1301" font-family="DejaVu Sans, sans-serif" font-size="21" fill="#7c4cb5" font-weight="bold" text-anchor="start">Container stdout / stderr</text>
+<text x="92" y="1326" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Only logs emitted by the containers are collected; request logging is not enabled in the Flask image.</text>
+<rect x="1131" y="489" width="604" height="849" rx="15" fill="#f5fafb" stroke="#9fc7c9" stroke-width="1.5"/>
+<text x="1155" y="530" font-family="DejaVu Sans, sans-serif" font-size="27" fill="#087f83" font-weight="bold" text-anchor="start">monitoring</text>
+<text x="1155" y="560" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">kube-prometheus-stack + loki-stack</text>
+<rect x="1161" y="599" width="544" height="143" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1161" y="599" width="6" height="143" rx="3" fill="#087f83" stroke="none" stroke-width="1.5"/>
+<text x="1184" y="633" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#087f83" font-weight="bold" text-anchor="start">Prometheus + Operator</text>
+<text x="1184" y="667" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">ServiceMonitors: 15s app / podinfo scrapes</text>
+<text x="1184" y="696" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">PrometheusRules: errors · latency · restarts · fault mode</text>
+<text x="1184" y="725" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Retention configured to 2 days</text>
+<polyline points="1161,677 1111,677 1111,1204 1092,1204" fill="none" stroke="#087f83" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1092,1204 1104.0,1209.0 1104.0,1199.0" fill="#087f83"/>
+<text x="1153" y="774" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#be4653" font-weight="normal" text-anchor="start">evaluated alerts</text>
+<polyline points="1288,742 1288,801" fill="none" stroke="#be4653" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1288,801 1293.0,789.0 1283.0,789.0" fill="#be4653"/>
+<polyline points="1575,801 1575,742" fill="none" stroke="#087f83" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1575,742 1570.0,754.0 1580.0,754.0" fill="#087f83"/>
+<text x="1590" y="776" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#087f83" font-weight="normal" text-anchor="start">queries</text>
+<rect x="1161" y="801" width="256" height="154" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1161" y="801" width="6" height="154" rx="3" fill="#be4653" stroke="none" stroke-width="1.5"/>
+<text x="1184" y="835" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#be4653" font-weight="bold" text-anchor="start">Alertmanager</text>
+<text x="1184" y="869" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">Groups / routes alerts</text>
+<text x="1184" y="898" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">No external receiver</text>
+<text x="1184" y="927" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">configured in this repo</text>
+<rect x="1445" y="801" width="260" height="154" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1445" y="801" width="6" height="154" rx="3" fill="#087f83" stroke="none" stroke-width="1.5"/>
+<text x="1468" y="835" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#087f83" font-weight="bold" text-anchor="start">Grafana</text>
+<text x="1468" y="869" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">App SLO dashboard</text>
+<text x="1468" y="898" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">Podinfo + platform views</text>
+<text x="1468" y="927" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">Operator: port-forward</text>
+<polyline points="1575,955 1575,1080" fill="none" stroke="#7c4cb5" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1575,1080 1580.0,1068.0 1570.0,1068.0" fill="#7c4cb5"/>
+<text x="1590" y="1021" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#7c4cb5" font-weight="normal" text-anchor="start">queries logs</text>
+<rect x="1161" y="1080" width="256" height="120" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1161" y="1080" width="6" height="120" rx="3" fill="#7c4cb5" stroke="none" stroke-width="1.5"/>
+<text x="1184" y="1114" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#7c4cb5" font-weight="bold" text-anchor="start">Promtail</text>
+<text x="1184" y="1148" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">Per-node log collector</text>
+<text x="1184" y="1177" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">Tails container logs</text>
+<rect x="1445" y="1080" width="260" height="120" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1445" y="1080" width="6" height="120" rx="3" fill="#7c4cb5" stroke="none" stroke-width="1.5"/>
+<text x="1468" y="1114" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#7c4cb5" font-weight="bold" text-anchor="start">Loki</text>
+<text x="1468" y="1148" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">Receives log streams</text>
+<text x="1468" y="1177" font-family="DejaVu Sans, sans-serif" font-size="16" fill="#53657d" font-weight="normal" text-anchor="start">Persistence disabled</text>
+<polyline points="1417,1137 1445,1137" fill="none" stroke="#7c4cb5" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1445,1137 1433.0,1132.0 1433.0,1142.0" fill="#7c4cb5"/>
+<polyline points="1092,1307 1120,1307 1120,1137 1161,1137" fill="none" stroke="#7c4cb5" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1161,1137 1149.0,1132.0 1149.0,1142.0" fill="#7c4cb5"/>
+<text x="1161" y="1240" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#087f83" font-weight="bold" text-anchor="start">Grafana queries both data sources.</text>
+<text x="1161" y="1270" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">App dashboard provisioned by ConfigMap;</text>
+<text x="1161" y="1299" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">podinfo dashboard imported manually.</text>
+<text x="72" y="1377" font-family="DejaVu Sans, sans-serif" font-size="18" fill="#53657d" font-weight="normal" text-anchor="start">Metrics Server supports kubectl top. No HPA or cluster autoscaler is declared. Monitoring shares the workloads’ failure domain.</text>
+<text x="40" y="1452" font-family="DejaVu Sans, sans-serif" font-size="28" fill="#14243b" font-weight="bold" text-anchor="start">Application delivery — GitHub Actions</text>
+<rect x="40" y="1477" width="380" height="161" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="40" y="1477" width="6" height="161" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="63" y="1511" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">Pull-request checks</text>
+<text x="63" y="1545" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">pytest · Docker build</text>
+<text x="63" y="1574" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Terraform / Helm validation</text>
+<text x="63" y="1603" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Gitleaks; no AWS credentials</text>
+<rect x="467" y="1477" width="390" height="161" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="467" y="1477" width="6" height="161" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="490" y="1511" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">Version tag → release</text>
+<text x="490" y="1545" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Tagged commit must be on main</text>
+<text x="490" y="1574" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">OIDC CI role → build + push ECR</text>
+<text x="490" y="1603" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Immutable tags · scan on push</text>
+<rect x="904" y="1477" width="385" height="161" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="904" y="1477" width="6" height="161" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="927" y="1511" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">Automatic dev deploy</text>
+<text x="927" y="1545" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">After successful release workflow</text>
+<text x="927" y="1574" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Dev OIDC role → Helm app-dev</text>
+<text x="927" y="1603" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">20s smoke gate; no auto rollback</text>
+<rect x="1336" y="1477" width="424" height="161" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+<rect x="1336" y="1477" width="6" height="161" rx="3" fill="#2563b9" stroke="none" stroke-width="1.5"/>
+<text x="1359" y="1511" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#2563b9" font-weight="bold" text-anchor="start">Manual production promotion</text>
+<text x="1359" y="1545" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Choose an existing ECR image tag</text>
+<text x="1359" y="1574" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">production environment rules*</text>
+<text x="1359" y="1603" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Prod OIDC role → Helm + k6 gates</text>
+<polyline points="420,1558 467,1558" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="467,1558 455.0,1553.0 455.0,1563.0" fill="#2563b9"/>
+<polyline points="857,1558 904,1558" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="904,1558 892.0,1553.0 892.0,1563.0" fill="#2563b9"/>
+<polyline points="1289,1558 1336,1558" fill="none" stroke="#2563b9" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<polygon points="1336,1558 1324.0,1553.0 1324.0,1563.0" fill="#2563b9"/>
+<rect x="40" y="1660" width="1720" height="114" rx="15" fill="#fff5f5" stroke="#e6c2c7" stroke-width="1.5"/>
+<text x="63" y="1694" font-family="DejaVu Sans, sans-serif" font-size="23" fill="#be4653" font-weight="bold" text-anchor="start">Production recovery belongs to promote.yml</text>
+<text x="63" y="1728" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#14243b" font-weight="normal" text-anchor="start">Rollout fails → Helm --atomic recovery. Smoke or load fails → restore the recorded revision; uninstall if no prior release exists.</text>
+<text x="63" y="1757" font-family="DejaVu Sans, sans-serif" font-size="19" fill="#be4653" font-weight="normal" text-anchor="start">Prometheus / Alertmanager observe continuously. Their alerts do not initiate rollback.</text>
+<text x="40" y="1810" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">* Required reviewers are an external GitHub setting. The workflow checks ECR tag existence; it does not enforce successful dev validation.</text>
+<text x="40" y="1843" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#53657d" font-weight="normal" text-anchor="start">Scope: public-subnet, single-AZ worker lab · metrics and logs only · no application database, tracing stack, or durable telemetry storage configured.</text>
+</svg>
